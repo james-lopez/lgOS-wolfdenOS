@@ -1,22 +1,19 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
-# SlopBro
-# by throwaway96
-# https://github.com/throwaway96/slopbro
-# Copyright 2026. Licensed under AGPL v3 or later. No warranties.
+# wolfdenOS
+# LG webOS Custom Home & Privacy Deployment Engine
 
 """
-slopbro.py - Connect to an LG webOS TV over SSAP, pair, and
-launch various apps with a self-hosted payload page.
+woldenOs.py / wolfdenOS.py - Connect to an LG webOS TV over SSAP, pair, and
+deploy wolfdenOS (Custom Purplish Glass Dock Home + Native wolf OS Core Mods).
 
 Single file, standard library only. Requires Python 3 and should be run on
 a PC on the same LAN as the TV.
 
 Example:
-    python3 slopbro.py 192.168.1.50
-    python3 slopbro.py --debug 192.168.1.50
-    python3 slopbro.py --local-ip 1.2.3.4 192.168.1.50
+    python3 woldenOs.py 192.168.97.141
+    python3 woldenOs.py --debug --webos-version 10 192.168.97.141
 """
 
 import argparse
@@ -90,11 +87,11 @@ PAIR_TIMEOUT = 60.0
 # launcher works across firmware versions; the TV grants what it recognizes.
 DEFAULT_MANIFEST = {
     "manifestVersion": 1,
-    "appVersion": "1.0",
-    "appId": "lol.slopbro",
-    "vendorId": "throwaway96",
-    "localizedAppNames": {"": "SlopBro"},
-    "localizedVendorNames": {"": "throwaway96"},
+    "appVersion": "2.0",
+    "appId": "tld.wolfdenos",
+    "vendorId": "wolfdenOS",
+    "localizedAppNames": {"": "wolfdenOS"},
+    "localizedVendorNames": {"": "wolfdenOS"},
     "permissions": [
         "LAUNCH",
         "CLOSE",
@@ -835,7 +832,7 @@ def _validate_ipv4_address(ip_text):
     return ip_text.count(".") == 3
 
 
-TEST_CONNECTION_MESSAGE = "Here's your slop, bro!\n"
+TEST_CONNECTION_MESSAGE = "wolfdenOS connection verified!\n"
 
 
 def make_test_connection_handler():
@@ -1117,7 +1114,7 @@ def run(
             die("no target apps configured for webOS %s" % webos_version)
         app_id, url_param_name = verify_app_present(client, target_apps)
 
-        log("launching %s -> %s" % (app_id, page_url))
+        log("[wolfdenOS] launching stage via %s -> %s" % (app_id, page_url))
         try:
             result = launch_app(client, app_id, {url_param_name: page_url})
         except SSAPError as exc:
@@ -1125,9 +1122,20 @@ def run(
 
         print(json.dumps(result, sort_keys=True))
 
-        log("waiting for all tracked files to be requested")
+        log("[wolfdenOS] waiting for TV to pull all wolfdenOS payload files...")
         tracker.wait_for_all(None)
-        log("done; all tracked files were requested (❛ ᴗ ❛)")
+        log("[wolfdenOS] all payload files delivered to TV — applying wolfdenOS & wolf OS!")
+        log("[wolfdenOS] waiting 5s for root script to finish installing wolfdenOS before closing stage...")
+        time.sleep(5.0)
+        try:
+            client.request("ssap://system.launcher/close", {"id": app_id}, timeout=3.0)
+        except Exception:
+            pass
+        try:
+            launch_app(client, "tld.slopbro.g3mod", {})
+            log("[wolfdenOS] launched wolfdenOS dashboard (tld.slopbro.g3mod) on TV!")
+        except Exception:
+            pass
     finally:
         client.close()
         if http_server is not None:

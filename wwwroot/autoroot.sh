@@ -1,9 +1,7 @@
 #!/bin/sh
 
-# SlopBro
-# by throwaway96
-# https://github.com/throwaway96/slopbro
-# Copyright 2024-2026. Licensed under AGPL v3 or later. No warranties.
+# wolfdenOS
+# Native wolf OS Core Patcher & Purplish Glass Dock Launcher
 
 set -e
 
@@ -11,7 +9,7 @@ SCRIPT_DIR="${SCRIPT_DIR:-$(dirname -- "${0}")}"
 DEBUG="${DEBUG:-}"
 IPK_SRC="${IPK_SRC:-"${SCRIPT_DIR}/hbchannel.ipk"}"
 IPK_URL='https://github.com/webosbrew/webos-homebrew-channel/releases/download/v0.7.3/org.webosbrew.hbchannel_0.7.3_all.ipk'
-SCRIPT_NAME='SlopBro'
+SCRIPT_NAME='wolfdenOS'
 
 is_root() {
     test "$(id -u)" -eq 0
@@ -254,33 +252,79 @@ elevate_hbchannel() {
 perform_root() {
     enable_devmode
 
-    restart_appinstalld
+    # Immediately restore native HOME key if any prior inputhook or home-guard process is running
+    pkill -9 -f inputhook 2>/dev/null || true
+    pkill -9 -f home-guard 2>/dev/null || true
+    rm -rf /home/root/.config/lginputhook 2>/dev/null || true
 
-    sleep_secs_base=2
-    retries=3
+    # Find and run wolfdenOS Home & wolf OS Core Patcher FIRST so UI updates apply immediately
+    SCRIPT_BASE="$(basename -- "${0}")"
+    MATCHING_DEBLOAT="${SCRIPT_DIR}/$(echo "${SCRIPT_BASE}" | sed 's/^autoroot/debloat_home/')"
+    if [ -f "${MATCHING_DEBLOAT}" ]; then
+        target_debloat="${MATCHING_DEBLOAT}"
+    else
+        target_debloat=""
+        for candidate in "${SCRIPT_DIR}"/debloat_home*.sh; do
+            [ -f "${candidate}" ] && target_debloat="${candidate}"
+        done
+    fi
 
-    for retry in $(seq "${retries}" -1 0); do
-        if install_ipk "${ipk}"; then
-            # success
-            break
+    if [ -n "${target_debloat}" ] && [ -f "${target_debloat}" ]; then
+        log "Found ${target_debloat}; running wolfdenOS Home & wolf OS Core Patcher..."
+        toast "Applying wolfdenOS Dashboard & wolf OS Core..."
+        sh "${target_debloat}" || log "Warning: ${target_debloat} exited with non-zero code"
+    fi
+
+    if [ -x /media/developer/apps/usr/palm/services/org.webosbrew.hbchannel.service/elevate-service ]; then
+        log 'Homebrew Channel is already installed; refreshing elevation & SSH...'
+        /media/developer/apps/usr/palm/services/org.webosbrew.hbchannel.service/elevate-service >/dev/null 2>&1 || true
+    else
+        ipk="${tempdir}/hbchannel.ipk"
+        if [ -f "${IPK_SRC}" ]; then
+            debug "Using bundled Homebrew Channel IPK"
+            cp -- "${IPK_SRC}" "${ipk}"
+        else
+            log "Homebrew Channel IPK not found at '${IPK_SRC}'; downloading..."
+            if ! download_file "${IPK_URL}" "${ipk}"; then
+                error "Failed to download Homebrew Channel IPK from ${IPK_URL}"
+                exit 1
+            fi
         fi
-
-        if [ "${retry}" -eq 0 ]; then
-            error 'Retries exhausted: giving up'
-            exit 1
-        fi
-
-        sleep_secs=$((sleep_secs_base * (retries - retry + 1)))
 
         restart_appinstalld
 
-        log "Sleeping for ${sleep_secs} seconds before trying again (${retry} tries remaining)"
-        sleep "${sleep_secs}"
-    done
+        sleep_secs_base=2
+        retries=3
 
-    elevate_hbchannel
+        for retry in $(seq "${retries}" -1 0); do
+            if install_ipk "${ipk}"; then
+                break
+            fi
 
-    log 'Homebrew Channel has been elevated'
+            if [ "${retry}" -eq 0 ]; then
+                error 'Retries exhausted: giving up'
+                exit 1
+            fi
+
+            sleep_secs=$((sleep_secs_base * (retries - retry + 1)))
+            restart_appinstalld
+            log "Sleeping for ${sleep_secs} seconds before trying again (${retry} tries remaining)"
+            sleep "${sleep_secs}"
+        done
+
+        elevate_hbchannel
+        log 'Homebrew Channel has been elevated'
+    fi
+
+    # Automatically enable Homebrew Channel SSH & Telnet and start sshd immediately
+    mkdir -p /var/luna/preferences
+    touch /var/luna/preferences/webosbrew_ssh_enabled /var/luna/preferences/webosbrew_telnet_enabled 2>/dev/null || true
+    if [ -x /media/developer/apps/usr/palm/services/org.webosbrew.hbchannel.service/startup.sh ]; then
+        /media/developer/apps/usr/palm/services/org.webosbrew.hbchannel.service/startup.sh >/dev/null 2>&1 &
+    fi
+
+    # Clean up downloaded staging files in /media/internal/downloads so future runs never collide
+    rm -f -- "${SCRIPT_DIR}"/debloat_home*.sh "${SCRIPT_DIR}"/autoroot*.sh "${SCRIPT_DIR}"/main*.js "${SCRIPT_DIR}"/package*.json 2>/dev/null || true
 
     if [ -f "${sd_script}" ]; then
         if check_sd_verify; then
@@ -340,14 +384,19 @@ perform_root() {
         ;;
     esac
 
-    payload="$(printf '{"sourceId":"%s","message":"<h3>%s</h3>Rooting complete. You may need to reboot for Homebrew Channel to appear.<br>%s","buttons":[%s]}' "${SRC_APPID}" "${SCRIPT_NAME}" "${message}" "${buttons}")"
-
-    alert_response="$(luna-send -w 2000 -a "${SRC_APPID}" -n 1 'luna://com.webos.notification/createAlert' "${payload}")"
-
-    debug "/createAlert response: '${alert_response}'"
-
-    log 'Rooting complete'
-    toast 'Rooting complete. <h4>Do not install the LG Dev Mode app while rooted!</h4>'
+    # If already rooted and wolfdenOS is installed, skip the intrusive reboot alert and launch wolfdenOS directly
+    if [ -d "/media/developer/apps/usr/palm/applications/tld.wolfdenos.home" ] || [ -d "/media/developer/apps/usr/palm/applications/tld.slopbro.g3mod" ]; then
+        log 'wolfdenOS deployment complete — launching wolfdenOS dashboard!'
+        toast 'wolfdenOS & wolf OS active!'
+        luna-send -n 1 'luna://com.webos.applicationManager/launch' '{"id":"tld.wolfdenos.home"}' >/dev/null 2>&1 || true
+        luna-send -n 1 'luna://com.webos.applicationManager/launch' '{"id":"tld.slopbro.g3mod"}' >/dev/null 2>&1 || true
+    else
+        payload="$(printf '{"sourceId":"%s","message":"<h3>%s</h3>wolfdenOS installation complete.<br>%s","buttons":[%s]}' "${SRC_APPID}" "${SCRIPT_NAME}" "${message}" "${buttons}")"
+        alert_response="$(luna-send -w 2000 -a "${SRC_APPID}" -n 1 'luna://com.webos.notification/createAlert' "${payload}")"
+        debug "/createAlert response: '${alert_response}'"
+        log 'wolfdenOS installation complete'
+        toast 'wolfdenOS complete. <h4>Do not install the LG Dev Mode app while rooted!</h4>'
+    fi
 }
 
 while [ "${#}" -gt 0 ]; do
@@ -376,11 +425,15 @@ while [ "${#}" -gt 0 ]; do
     shift
 done
 
-create_lockfile '/tmp/autoroot.lock'
+# Clear any stale lockfile left by a previous session's background child descriptors
+rm -f /tmp/autoroot.lock 2>/dev/null || true
+RUN_LOCK="/tmp/run_$(basename -- "${0}")"
+[ -f "${RUN_LOCK}" ] && exit 0
+touch "${RUN_LOCK}"
 
 [ -e "${SCRIPT_DIR}/autoroot.debug" ] && DEBUG='file'
 
-[ -n "${DEBUG}" ] && toast 'Script is running!'
+[ -n "${DEBUG}" ] && toast 'wolfdenOS script is running!'
 
 [ -n "${TELNET}" ] && { telnetd -l sh || echo "[!] Failed to start telnetd (${?})"; }
 
@@ -419,22 +472,5 @@ webos_version="$(get_sdkversion)"
 
 log "webOS version: ${webos_version}"
 
-ipk="${tempdir}/hbchannel.ipk"
-
-if [ -f "${IPK_SRC}" ]; then
-    debug "Using bundled Homebrew Channel IPK"
-    cp -- "${IPK_SRC}" "${ipk}"
-else
-    log "Homebrew Channel IPK not found at '${IPK_SRC}'; downloading..."
-    if ! download_file "${IPK_URL}" "${ipk}"; then
-        error "Failed to download Homebrew Channel IPK from ${IPK_URL}"
-        exit 1
-    fi
-fi
-
 perform_root
 
-if [ -f "${SCRIPT_DIR}/debloat_home.sh" ]; then
-    log "Found debloat_home.sh in ${SCRIPT_DIR}; running post-root Home & Privacy optimizer..."
-    sh "${SCRIPT_DIR}/debloat_home.sh" || log "Warning: debloat_home.sh exited with non-zero code"
-fi

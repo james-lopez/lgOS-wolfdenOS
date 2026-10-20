@@ -64,14 +64,14 @@ interface G3ModConfig {
   curlInsecure: boolean;
   fakeServicePath: string;
   launcherTheme: {
-    uiParadigm: "cleanframe-list" | "piny-tiles" | "glass-dock";
+    uiParadigm: "horizontal-glass-dock" | "cleanframe-list" | "piny-tiles";
     focusTreatment: "type" | "glass" | "glow";
     materialStyle: "clear-tint" | "frost" | "soft-oled";
     activeSeason:
+      | "purplish-nebula"
       | "fall-pumpkin"
       | "misty-autumn-coast"
       | "moody-forest-oled"
-      | "winter-aurora"
       | "midnight-oled";
     greetingTitle: string;
     greetingSubtitle: string;
@@ -129,7 +129,7 @@ interface G3ModConfig {
 }
 
 const APP_PRESETS = [
-  { id: "tld.slopbro.g3mod", label: "lgOS-getSlopped Custom Home" },
+  { id: "tld.wolfdenos.home", label: "wolfdenOS / wolf OS Custom Home" },
   { id: "org.webosbrew.youtube.leanback.v4", label: "YouTube AdFree (Homebrew)" },
   { id: "org.jellyfin.webos", label: "Jellyfin" },
   { id: "org.moonfin.webos", label: "Moonfin (Jellyfin Client)" },
@@ -180,15 +180,26 @@ function renderAppIcon(iconKey: string, className = "w-4 h-4") {
       return <Play className={`${className} fill-current`} />;
     case "netflix":
     case "disney":
+    case "hulu":
+    case "hbomax":
+    case "paramount":
+    case "crunchyroll":
+    case "peacock":
+    case "tubi":
+    case "plutotv":
+    case "sling":
+    case "orka":
     case "prime":
     case "appletv":
       return <Film className={className} />;
     case "jellyfin":
     case "plex":
+    case "mediaplayer":
       return <Server className={className} />;
     case "spotify":
       return <Music className={className} />;
     case "gamepad":
+    case "xbox":
     case "moonlight":
       return <Gamepad2 className={className} />;
     default:
@@ -198,47 +209,14 @@ function renderAppIcon(iconKey: string, className = "w-4 h-4") {
 
 const INITIAL_SIDEBAR_APPS: SidebarAppItem[] = [
   {
-    id: "org.webosbrew.youtube.leanback.v4",
+    id: "youtube.leanback.v4",
     name: "YouTube",
-    subtitle: "AdFree 4K HDR · SponsorBlock",
+    subtitle: "4K HDR · 60fps",
     category: "Streaming",
     accentColor: "#ef4444",
     tileBgColor: "#ffffff",
     tileTextColor: "#111111",
     iconKey: "youtube",
-    enabled: true,
-  },
-  {
-    id: "netflix",
-    name: "Netflix",
-    subtitle: "Dolby Vision · Atmos",
-    category: "Streaming",
-    accentColor: "#e50914",
-    tileBgColor: "#ffffff",
-    tileTextColor: "#e50914",
-    iconKey: "netflix",
-    enabled: true,
-  },
-  {
-    id: "cdp-30",
-    name: "Plex",
-    subtitle: "Cinema Library · TrueHD",
-    category: "Media Server",
-    accentColor: "#e5a00d",
-    tileBgColor: "#1f2326",
-    tileTextColor: "#ffffff",
-    iconKey: "plex",
-    enabled: true,
-  },
-  {
-    id: "org.jellyfin.webos",
-    name: "Jellyfin",
-    subtitle: "Direct Play · 192.168.97.x",
-    category: "Media Server",
-    accentColor: "#a855f7",
-    tileBgColor: "#1b1429",
-    tileTextColor: "#ffffff",
-    iconKey: "jellyfin",
     enabled: true,
   },
   {
@@ -253,25 +231,14 @@ const INITIAL_SIDEBAR_APPS: SidebarAppItem[] = [
     enabled: true,
   },
   {
-    id: "spotify-beehive",
-    name: "Spotify",
-    subtitle: "Lossless eARC Audio",
+    id: "hulu",
+    name: "Hulu",
+    subtitle: "FX · Originals · Live",
     category: "Streaming",
-    accentColor: "#1ed760",
-    tileBgColor: "#1ed760",
-    tileTextColor: "#000000",
-    iconKey: "spotify",
-    enabled: true,
-  },
-  {
-    id: "com.limelight.webos",
-    name: "GeForce / Moonlight",
-    subtitle: "PC 4K 120Hz · 0.8ms",
-    category: "Gaming & Inputs",
-    accentColor: "#76b900",
-    tileBgColor: "#1a1c1e",
-    tileTextColor: "#ffffff",
-    iconKey: "moonlight",
+    accentColor: "#1ce783",
+    tileBgColor: "#0b1a14",
+    tileTextColor: "#1ce783",
+    iconKey: "hulu",
     enabled: true,
   },
   {
@@ -286,6 +253,17 @@ const INITIAL_SIDEBAR_APPS: SidebarAppItem[] = [
     enabled: true,
   },
   {
+    id: "com.wbd.stream",
+    name: "HBO Max",
+    subtitle: "Dolby Vision · Atmos",
+    category: "Streaming",
+    accentColor: "#8b5cf6",
+    tileBgColor: "#160d2e",
+    tileTextColor: "#ffffff",
+    iconKey: "hbomax",
+    enabled: true,
+  },
+  {
     id: "amazon",
     name: "Prime Video",
     subtitle: "UHD HDR10+",
@@ -297,31 +275,119 @@ const INITIAL_SIDEBAR_APPS: SidebarAppItem[] = [
     enabled: true,
   },
   {
-    id: "com.webos.app.hdmi1",
-    name: "HDMI 1 · PS5",
-    subtitle: "4K 120Hz · VRR · ALLM",
-    category: "Gaming & Inputs",
-    accentColor: "#6366f1",
-    tileBgColor: "#171926",
+    id: "com.cbs-all-access.webapp.prod",
+    name: "Paramount+",
+    subtitle: "Peak Streaming · CBS",
+    category: "Streaming",
+    accentColor: "#0064ff",
+    tileBgColor: "#071633",
     tileTextColor: "#ffffff",
-    iconKey: "gamepad",
+    iconKey: "paramount",
+    enabled: true,
+  },
+  {
+    id: "com.crunchyroll.webapp",
+    name: "Crunchyroll",
+    subtitle: "Anime Simulcast · 1080p",
+    category: "Streaming",
+    accentColor: "#f47521",
+    tileBgColor: "#241104",
+    tileTextColor: "#ffffff",
+    iconKey: "crunchyroll",
+    enabled: true,
+  },
+  {
+    id: "com.peacock.tv",
+    name: "Peacock",
+    subtitle: "NBC · Live Sports & Movies",
+    category: "Streaming",
+    accentColor: "#facc15",
+    tileBgColor: "#141418",
+    tileTextColor: "#ffffff",
+    iconKey: "peacock",
+    enabled: true,
+  },
+  {
+    id: "com.microsoft.xbox",
+    name: "Xbox",
+    subtitle: "Cloud Gaming · 60fps",
+    category: "Gaming & Inputs",
+    accentColor: "#107c10",
+    tileBgColor: "#0c210c",
+    tileTextColor: "#ffffff",
+    iconKey: "xbox",
+    enabled: true,
+  },
+  {
+    id: "com.tubitv.ott.tubi",
+    name: "Tubi",
+    subtitle: "Free Movies & TV",
+    category: "Streaming",
+    accentColor: "#fa382f",
+    tileBgColor: "#220918",
+    tileTextColor: "#ffffff",
+    iconKey: "tubi",
+    enabled: true,
+  },
+  {
+    id: "com.plutotv.app",
+    name: "Pluto TV",
+    subtitle: "Live Channels · On Demand",
+    category: "Streaming",
+    accentColor: "#fff200",
+    tileBgColor: "#141414",
+    tileTextColor: "#fff200",
+    iconKey: "plutotv",
+    enabled: true,
+  },
+  {
+    id: "com.movenetworks.app.sling-tv-sling-production",
+    name: "Sling TV",
+    subtitle: "Live TV Channels",
+    category: "Streaming",
+    accentColor: "#0076ff",
+    tileBgColor: "#0b192e",
+    tileTextColor: "#ffffff",
+    iconKey: "sling",
+    enabled: true,
+  },
+  {
+    id: "tv.orka.lgtv",
+    name: "OrkaTV",
+    subtitle: "Installed Channel App",
+    category: "Streaming",
+    accentColor: "#38bdf8",
+    tileBgColor: "#0c1926",
+    tileTextColor: "#ffffff",
+    iconKey: "orka",
     enabled: true,
   },
   {
     id: "org.webosbrew.hbchannel",
-    name: "Homebrew",
+    name: "Homebrew Channel",
     subtitle: "Root Services & Mods",
     category: "System",
-    accentColor: "#f97316",
+    accentColor: "#c084fc",
     tileBgColor: "#27170c",
     tileTextColor: "#ffffff",
     iconKey: "homebrew",
+    enabled: true,
+  },
+  {
+    id: "com.webos.app.livetv",
+    name: "Live TV",
+    subtitle: "Tuner & Antenna",
+    category: "Gaming & Inputs",
+    accentColor: "#f43f5e",
+    tileBgColor: "#1f1218",
+    tileTextColor: "#ffffff",
+    iconKey: "livetv",
     enabled: false,
   },
 ];
 
 const INITIAL_CONFIG: G3ModConfig = {
-  repoName: "lgOS-getSlopped",
+  repoName: "lgOS-wolfdenOS",
   githubOwner: "james-lopez",
   tvIp: "192.168.97.141",
   tvModel: "OLED65G3PUA",
@@ -331,18 +397,18 @@ const INITIAL_CONFIG: G3ModConfig = {
   curlInsecure: false,
   fakeServicePath: "/usr/palm/services/com.palm.service.devmode",
   launcherTheme: {
-    uiParadigm: "cleanframe-list",
-    focusTreatment: "type",
-    materialStyle: "clear-tint",
-    activeSeason: "fall-pumpkin",
-    greetingTitle: "Autumn Harvest on G3 OLED",
-    greetingSubtitle: "CleanFrame Typography + Piny Squircle Sidebar · Fall & Pumpkin Edition",
+    uiParadigm: "horizontal-glass-dock",
+    focusTreatment: "glass",
+    materialStyle: "frost",
+    activeSeason: "purplish-nebula",
+    greetingTitle: "Velvet Twilight on G3 OLED",
+    greetingSubtitle: "Horizontal Glass Dock · Installed TV Apps · Hard-Press OK to Reorder/Delete",
     ambientParticles: true,
     turnOnAnimation: true,
     sidebarPosition: "left",
     sidebarStyle: "frosted-glass",
     showContentShelves: false,
-    oledBrightness: 82,
+    oledBrightness: 88,
     autoHideSidebarSec: 15,
     customWallpaperUrl: "",
   },
@@ -465,6 +531,7 @@ export default function G3StudioPage() {
     "sidebar-seasonal" | "stock-debloated" | "stock-bloat"
   >("sidebar-seasonal");
   const [selectedSidebarIdx, setSelectedSidebarIdx] = useState<number>(0);
+  const [reorderDockMode, setReorderDockMode] = useState<boolean>(false);
   const [tvPowerState, setTvPowerState] = useState<"on" | "turning-on" | "launched">("on");
   const [activeLaunchedApp, setActiveLaunchedApp] = useState<SidebarAppItem | null>(null);
   const [inspoVideoUrl, setInspoVideoUrl] = useState<string | null>(null);
@@ -472,7 +539,7 @@ export default function G3StudioPage() {
   const [saving, setSaving] = useState(false);
   const [running, setRunning] = useState(false);
   const [terminalLog, setTerminalLog] = useState<string>(
-    "[ready] Repo: github.com/james-lopez/lgOS-getSlopped\n[ready] Target: LG OLED65G3PUA @ 192.168.97.141 (webOS 25 / 10.3.0-2504)\n[ready] Paradigms: CleanFrame Photo List + @iampiny Squircle Brand Sidebar + Fall Harvest Theme"
+    "[ready] Repo: github.com/james-lopez/lgOS-wolfdenOS\n[ready] Target: LG OLED65G3PUA @ 192.168.97.141 (webOS 25 / 10.3.0-2504)\n[ready] Paradigms: wolfdenOS Purplish Horizontal Glass Dock + wolf OS Core Patcher"
   );
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
 
@@ -497,11 +564,11 @@ export default function G3StudioPage() {
       const tag = (e.target as HTMLElement)?.tagName;
       if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
 
-      if (e.key === "ArrowDown") {
+      if (e.key === "ArrowDown" || e.key === "ArrowRight") {
         e.preventDefault();
         setActiveLaunchedApp(null);
         setSelectedSidebarIdx((prev) => (prev + 1) % enabledApps.length);
-      } else if (e.key === "ArrowUp") {
+      } else if (e.key === "ArrowUp" || e.key === "ArrowLeft") {
         e.preventDefault();
         setActiveLaunchedApp(null);
         setSelectedSidebarIdx(
@@ -566,7 +633,7 @@ export default function G3StudioPage() {
     if (!config) return;
     setRunning(true);
     setTerminalLog(
-      `[exec] Saving lgOS-getSlopped payload to wwwroot/debloat_home.sh and rebuilding dist/slopbro_packed.py...\n[exec] Running: python3 slopbro.py --debug --webos-version 10 ${config.tvIp}\n[wait] Connecting to wss://${config.tvIp}:3001 ...`
+      `[exec] Saving wolfdenOS payload to wwwroot/debloat_home.sh and rebuilding dist/woldenOs_packed.py...\n[exec] Running: python3 woldenOs.py --debug --webos-version 10 ${config.tvIp}\n[wait] Connecting to wss://${config.tvIp}:3001 ...`
     );
     try {
       const res = await fetch("/api/slopbro", {
@@ -625,7 +692,7 @@ export default function G3StudioPage() {
             <div>
               <div className="flex items-center gap-2 flex-wrap">
                 <h1 className="font-semibold text-base sm:text-lg tracking-tight text-white">
-                  lgOS-getSlopped
+                  lgOS-wolfdenOS
                 </h1>
                 <Badge className="bg-orange-500/15 text-orange-300 border-orange-500/30 text-xs font-mono">
                   github.com/{config.githubOwner}/{config.repoName}
@@ -650,7 +717,7 @@ export default function G3StudioPage() {
               <Power className="w-4 h-4 text-orange-400" />
               Simulate TV Turn-On
             </Button>
-            <a href="/api/download?file=packed" download="lgOS-getSlopped.py">
+            <a href="/api/download?file=packed" download="woldenOs_packed.py">
               <Button
                 variant="outline"
                 size="sm"
@@ -686,16 +753,16 @@ export default function G3StudioPage() {
             </span>
             {[
               {
+                id: "horizontal-glass-dock" as const,
+                label: "Iteration 2 · Horizontal Glass Dock",
+              },
+              {
                 id: "cleanframe-list" as const,
                 label: "CleanFrame Photo List (Typography)",
               },
               {
                 id: "piny-tiles" as const,
                 label: "Piny Brand Tiles (@iampiny)",
-              },
-              {
-                id: "glass-dock" as const,
-                label: "Frosted Glass Sidebar",
               },
             ].map((item) => (
               <button
@@ -727,9 +794,9 @@ export default function G3StudioPage() {
               WALLPAPER:
             </span>
             {[
+              { id: "purplish-nebula" as const, label: "Purplish Nebula (Default)" },
               { id: "fall-pumpkin" as const, label: "Harvest Pumpkins" },
               { id: "misty-autumn-coast" as const, label: "Misty Autumn Coast" },
-              { id: "moody-forest-oled" as const, label: "Piny Forest Glow" },
               { id: "midnight-oled" as const, label: "Pure OLED" },
             ].map((wp) => (
               <button
@@ -976,8 +1043,29 @@ export default function G3StudioPage() {
                         />
                       )}
 
-                      {season === "winter-aurora" && (
-                        <div className="absolute inset-0 bg-gradient-to-br from-[#020813] via-[#061c2e] to-[#020409]" />
+                      {season === "purplish-nebula" && (
+                        <div
+                          className="absolute inset-0 overflow-hidden"
+                          style={{
+                            background:
+                              "radial-gradient(125% 95% at 18% 15%, rgba(91, 33, 182, 0.56) 0%, rgba(46, 16, 101, 0.36) 42%, transparent 74%), radial-gradient(110% 85% at 82% 24%, rgba(147, 51, 234, 0.44) 0%, rgba(88, 28, 135, 0.28) 46%, transparent 76%), radial-gradient(95% 75% at 50% 85%, rgba(192, 38, 211, 0.34) 0%, rgba(59, 7, 100, 0.38) 52%, transparent 82%), linear-gradient(160deg, #070312 0%, #120726 38%, #1d0b3a 68%, #090314 100%)",
+                          }}
+                        >
+                          <div
+                            className="absolute -top-16 -left-12 w-80 h-80 rounded-full blur-3xl pointer-events-none opacity-65"
+                            style={{
+                              background:
+                                "radial-gradient(circle, rgba(168, 85, 247, 0.55) 0%, rgba(126, 34, 206, 0.18) 62%, transparent 100%)",
+                            }}
+                          />
+                          <div
+                            className="absolute -bottom-20 right-10 w-96 h-96 rounded-full blur-3xl pointer-events-none opacity-60"
+                            style={{
+                              background:
+                                "radial-gradient(circle, rgba(217, 70, 239, 0.42) 0%, rgba(107, 33, 168, 0.16) 65%, transparent 100%)",
+                            }}
+                          />
+                        </div>
                       )}
 
                       {season === "midnight-oled" && (
@@ -1318,48 +1406,180 @@ export default function G3StudioPage() {
                       )}
 
                       {/* =================================================
-                         PARADIGM C: FROSTED GLASS SIDEBAR DOCK
+                         PARADIGM C: ITERATION 2 — HORIZONTAL GLASS DOCK
                          ================================================= */}
-                      {paradigm === "glass-dock" && (
-                        <div className="relative z-10 w-full h-full flex justify-between">
-                          <div className="w-64 h-full bg-black/65 backdrop-blur-xl border-r border-orange-500/20 p-3.5 flex flex-col justify-between">
-                            <div className="flex items-center justify-between px-2 pb-2 border-b border-white/10">
-                              <span className="text-xs font-semibold text-orange-100">
-                                Quick Apps
-                              </span>
-                              <span className="text-[10px] font-mono text-orange-300">
-                                HOME · 773
-                              </span>
+                      {paradigm === "horizontal-glass-dock" && (
+                        <div className="relative z-10 w-full h-full flex flex-col justify-between px-8 py-6">
+                          {/* Top Row: 9:41 Clock on Left + 3 Minimal Translucent Utility Icons on Right */}
+                          <div className="flex items-center justify-between">
+                            <div className="text-2xl sm:text-3xl font-normal tracking-tight text-white/95 drop-shadow-[0_4px_20px_rgba(0,0,0,0.45)]">
+                              9:41
                             </div>
-                            <div className="my-2 flex-1 space-y-1 overflow-y-auto">
-                              {enabledApps.map((app, idx) => {
+                            <div className="flex items-center gap-2.5 text-white/75">
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  syncConfig({
+                                    ...config,
+                                    launcherTheme: {
+                                      ...config.launcherTheme,
+                                      activeSeason:
+                                        season === "purplish-nebula"
+                                          ? "fall-pumpkin"
+                                          : "purplish-nebula",
+                                    },
+                                  })
+                                }
+                                title="Cycle Purplish Gradient / Wallpaper"
+                                className="p-2 rounded-lg hover:bg-white/10 hover:text-white transition"
+                              >
+                                <ImageIcon className="w-4 h-4" />
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => setReorderDockMode((prev) => !prev)}
+                                title="All Installed TV Apps & Arrange Dock"
+                                className={`p-2 rounded-lg transition ${
+                                  reorderDockMode
+                                    ? "bg-purple-500/30 text-purple-100 border border-purple-400/50"
+                                    : "hover:bg-white/10 hover:text-white"
+                                }`}
+                              >
+                                <Grid className="w-4 h-4" />
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => setReorderDockMode((prev) => !prev)}
+                                title="Toggle Hard-Press Move / Delete Mode"
+                                className={`p-2 rounded-lg transition ${
+                                  reorderDockMode
+                                    ? "bg-fuchsia-500/30 text-fuchsia-100 border border-fuchsia-400/50"
+                                    : "hover:bg-white/10 hover:text-white"
+                                }`}
+                              >
+                                <Settings className="w-4 h-4" />
+                              </button>
+                            </div>
+                          </div>
+
+                          {/* Center: Launched App Overlay or Subtle Reorder Pill */}
+                          <div className="my-auto flex flex-col items-center justify-center pointer-events-none">
+                            {activeLaunchedApp && (
+                              <div className="pointer-events-auto rounded-2xl bg-black/75 backdrop-blur-xl border border-purple-400/35 px-5 py-3.5 shadow-2xl flex items-center gap-3.5">
+                                <div className="w-10 h-10 rounded-xl bg-purple-500/25 border border-purple-400/40 flex items-center justify-center text-white">
+                                  {renderAppIcon(activeLaunchedApp.iconKey, "w-5 h-5")}
+                                </div>
+                                <div>
+                                  <div className="text-xs font-semibold text-white">
+                                    Launching {activeLaunchedApp.name}
+                                  </div>
+                                  <div className="text-[10px] font-mono text-purple-200/80">
+                                    luna://com.webos.applicationManager/launch · {activeLaunchedApp.id}
+                                  </div>
+                                </div>
+                              </div>
+                            )}
+                            {reorderDockMode && !activeLaunchedApp && (
+                              <div className="pointer-events-auto rounded-full bg-purple-950/80 border border-purple-400/45 px-4 py-1.5 text-[11px] text-purple-100 shadow-lg flex items-center gap-2">
+                                <span className="font-semibold text-fuchsia-300">
+                                  Hard-Press Arrange Active:
+                                </span>
+                                <span>Use ◀ / ▶ below icon to move order · ✕ to remove from dock</span>
+                              </div>
+                            )}
+                          </div>
+
+                          {/* Bottom Horizontal Frosted Glass Dock + Centered App Title Below */}
+                          <div className="flex flex-col items-center pb-1">
+                            <div
+                              className="w-full max-w-[92%] rounded-[26px] px-5 sm:px-7 py-4 sm:py-5 flex items-center justify-between gap-2 sm:gap-4 border border-white/15 shadow-[0_24px_60px_rgba(0,0,0,0.6),inset_0_1px_0_rgba(255,255,255,0.18)]"
+                              style={{
+                                background:
+                                  "linear-gradient(180deg, rgba(255,255,255,0.11) 0%, rgba(255,255,255,0.05) 100%)",
+                                backdropFilter: "blur(28px) saturate(150%)",
+                              }}
+                            >
+                              {enabledApps.slice(0, 9).map((app, idx) => {
                                 const isSelected = idx === selectedSidebarIdx;
+                                const realIndex = config.apps.findIndex(
+                                  (a) => a.id === app.id
+                                );
                                 return (
-                                  <button
+                                  <div
                                     key={app.id}
-                                    type="button"
-                                    onClick={() => setSelectedSidebarIdx(idx)}
-                                    className={`w-full flex items-center gap-2.5 px-2.5 py-1.5 rounded-xl text-left transition ${
-                                      isSelected
-                                        ? "bg-orange-500/25 border border-orange-400/50 text-white"
-                                        : "text-zinc-400 hover:bg-white/5"
-                                    }`}
+                                    className="relative flex flex-col items-center group"
                                   >
-                                    <div
-                                      className="w-6 h-6 rounded-lg flex items-center justify-center text-white shrink-0"
-                                      style={{ backgroundColor: app.accentColor }}
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        setSelectedSidebarIdx(idx);
+                                        setActiveLaunchedApp(null);
+                                      }}
+                                      onDoubleClick={() => setActiveLaunchedApp(app)}
+                                      onContextMenu={(e) => {
+                                        e.preventDefault();
+                                        setSelectedSidebarIdx(idx);
+                                        setReorderDockMode((prev) => !prev);
+                                      }}
+                                      title={`${app.name} (${app.id}) · Double-click to launch · Right-click or hold OK on TV to move/delete`}
+                                      className={`w-10 h-10 sm:w-12 sm:h-12 rounded-2xl flex items-center justify-center transition-all duration-200 ${
+                                        isSelected
+                                          ? reorderDockMode
+                                            ? "text-white opacity-100 scale-125 -translate-y-1.5 bg-purple-500/30 ring-2 ring-purple-300 shadow-[0_10px_28px_rgba(168,85,247,0.55)]"
+                                            : "text-white opacity-100 scale-125 -translate-y-0.5 drop-shadow-[0_6px_18px_rgba(255,255,255,0.5)]"
+                                          : "text-white/55 opacity-55 hover:opacity-85 hover:text-white/85"
+                                      }`}
                                     >
-                                      {renderAppIcon(app.iconKey, "w-3.5 h-3.5")}
-                                    </div>
-                                    <span className="text-xs font-medium truncate">
-                                      {app.name}
-                                    </span>
-                                  </button>
+                                      {renderAppIcon(
+                                        app.iconKey,
+                                        "w-6 h-6 sm:w-8 sm:h-8"
+                                      )}
+                                    </button>
+
+                                    {/* Hard-Press Move / Delete Controls when Reorder Mode is active on selected icon */}
+                                    {reorderDockMode && isSelected && (
+                                      <div className="absolute -top-7 flex items-center gap-1 bg-zinc-950/95 border border-purple-400/50 rounded-full px-1.5 py-0.5 shadow-lg z-20">
+                                        <button
+                                          type="button"
+                                          onClick={() => moveApp(realIndex, "up")}
+                                          title="Move Left"
+                                          className="text-[10px] text-purple-200 hover:text-white px-1"
+                                        >
+                                          ◀
+                                        </button>
+                                        <button
+                                          type="button"
+                                          onClick={() => toggleApp(app.id)}
+                                          title="Remove from Dock"
+                                          className="text-[10px] text-rose-400 hover:text-rose-200 px-1 font-bold"
+                                        >
+                                          ✕
+                                        </button>
+                                        <button
+                                          type="button"
+                                          onClick={() => moveApp(realIndex, "down")}
+                                          title="Move Right"
+                                          className="text-[10px] text-purple-200 hover:text-white px-1"
+                                        >
+                                          ▶
+                                        </button>
+                                      </div>
+                                    )}
+                                  </div>
                                 );
                               })}
                             </div>
-                            <div className="text-[10px] text-emerald-400 font-mono px-2">
-                              ACR/Ads Blocked: 28 hosts
+
+                            {/* Focused App Label Centered Directly Underneath the Glass Dock (Disney+ style) */}
+                            <div className="mt-3 h-6 flex items-center justify-center gap-2">
+                              <span className="text-sm sm:text-base font-medium tracking-tight text-white/95 drop-shadow-[0_2px_12px_rgba(0,0,0,0.85)]">
+                                {focusedApp?.name ?? ""}
+                              </span>
+                              {reorderDockMode && (
+                                <span className="text-[10px] font-mono uppercase tracking-wider px-2 py-0.5 rounded-full bg-purple-500/30 border border-purple-400/40 text-purple-200">
+                                  Hold OK · Move / Delete
+                                </span>
+                              )}
                             </div>
                           </div>
                         </div>
@@ -1515,20 +1735,19 @@ export default function G3StudioPage() {
                 <div className="rounded-lg bg-zinc-950 border border-zinc-800 p-3.5 space-y-2">
                   <div className="flex items-center justify-between">
                     <span className="text-xs font-semibold text-emerald-300">
-                      Step 1 — Publish Repository to GitHub (`github.com/james-lopez/lgOS-getSlopped`)
+                      Step 1 — Repository (`github.com/james-lopez/lgOS-wolfdenOS`)
                     </span>
                   </div>
                   <p className="text-xs text-zinc-400 leading-relaxed">
-                    Click the <strong className="text-white">Create repo</strong> pill at the top of your Cursor agent view and name it{" "}
-                    <code className="text-orange-300">lgOS-getSlopped</code>. Every commit on <code className="text-zinc-200">main</code> is already staged and pushed here, so clicking that pill immediately creates your GitHub repository.
+                    Hosted at <code className="text-orange-300">github.com/james-lopez/lgOS-wolfdenOS</code>.
                   </p>
                 </div>
 
-                {/* Step 2: Clone & Run SlopBro over Wi-Fi */}
+                {/* Step 2: Clone & Run woldenOs.py over Wi-Fi */}
                 <div className="rounded-lg bg-zinc-950 border border-orange-500/30 p-3.5 space-y-2">
                   <div className="flex items-center justify-between">
                     <span className="text-xs font-semibold text-orange-300">
-                      Step 2 — Run the Root + Custom Launcher Installer on Your Laptop
+                      Step 2 — Run the wolfdenOS & wolf OS Installer on Your Laptop
                     </span>
                     <Button
                       variant="ghost"
@@ -1537,7 +1756,7 @@ export default function G3StudioPage() {
                       onClick={() =>
                         copyText(
                           "runlan",
-                          `git clone https://github.com/${config.githubOwner}/${config.repoName}.git\ncd ${config.repoName}\npython3 -m pip install websockets\npython3 slopbro.py --debug --webos-version 10 ${config.tvIp}`
+                          `git clone https://github.com/${config.githubOwner}/${config.repoName}.git\ncd ${config.repoName}\npython3 -m pip install websockets\npython3 woldenOs.py --debug --webos-version 10 ${config.tvIp}`
                         )
                       }
                     >
@@ -1553,7 +1772,7 @@ export default function G3StudioPage() {
                     {`git clone https://github.com/${config.githubOwner}/${config.repoName}.git
 cd ${config.repoName}
 python3 -m pip install websockets
-python3 slopbro.py --debug --webos-version 10 ${config.tvIp}`}
+python3 woldenOs.py --debug --webos-version 10 ${config.tvIp}`}
                   </pre>
                   <p className="text-[11px] text-zinc-400">
                     When prompted on your LG G3 screen, click <strong className="text-white">Accept / Allow</strong> on the TV remote. SlopBro will root the TV, install Homebrew Channel, deploy your <code className="text-zinc-200">tld.slopbro.g3mod</code> custom launcher + stripped <code className="text-zinc-200">home.xml</code>, block all 28 LG ad/ACR domains, and bind your Magic Remote <strong className="text-white">HOME (773)</strong> button.

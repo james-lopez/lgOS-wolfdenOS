@@ -1,7 +1,5 @@
-/* SlopBro
- * by throwaway96
- * https://github.com/throwaway96/slopbro
- * Copyright 2026. Licensed under AGPL v3 or later. No warranties.
+/* wolfdenOS
+ * Root JS Service Runner
  */
 
 const child_process = require("child_process");
@@ -11,11 +9,13 @@ function log() {
   const args = Array.prototype.slice.call(arguments);
   const message = args.join(" ");
   console.log(message);
-  fs.appendFileSync("/tmp/slopbro.log", message + "\n");
+  try {
+    fs.appendFileSync("/tmp/wolfdenos-service.log", message + "\n");
+  } catch (e) {}
 }
 
 function run() {
-  log("entered run()");
+  log("entered wolfdenOS run()");
 
   if (process.argv.length < 3) {
     log("error: missing script path");
@@ -31,16 +31,16 @@ function run() {
   var status = "unknown error";
 
   try {
-    child_process.execFileSync("/bin/sh", [scriptPath].concat(args));
-
+    child_process.execFileSync("/bin/sh", [scriptPath].concat(args), {
+      stdio: "ignore",
+      timeout: 45000,
+    });
     status = "success";
   } catch (err) {
     status = "error: " + err.message;
   } finally {
     log("result:", status);
-
-    // XXX: Should we bail out or let the "service" continue?
-    //process.exit(0);
+    process.exit(0);
   }
 }
 

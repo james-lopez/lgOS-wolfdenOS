@@ -1,5 +1,5 @@
 {
-  "repoName": "lgOS-getSlopped",
+  "repoName": "lgOS-wolfdenOS",
   "githubOwner": "james-lopez",
   "tvIp": "192.168.97.141",
   "tvModel": "OLED65G3PUA",
@@ -26,47 +26,14 @@
   },
   "sidebarApps": [
     {
-      "id": "org.webosbrew.youtube.leanback.v4",
+      "id": "youtube.leanback.v4",
       "name": "YouTube",
-      "subtitle": "AdFree 4K HDR · SponsorBlock",
+      "subtitle": "4K HDR · 60fps",
       "category": "Streaming",
       "accentColor": "#ef4444",
       "tileBgColor": "#ffffff",
       "tileTextColor": "#111111",
       "iconKey": "youtube",
-      "enabled": true
-    },
-    {
-      "id": "netflix",
-      "name": "Netflix",
-      "subtitle": "Dolby Vision · Atmos",
-      "category": "Streaming",
-      "accentColor": "#e50914",
-      "tileBgColor": "#ffffff",
-      "tileTextColor": "#e50914",
-      "iconKey": "netflix",
-      "enabled": true
-    },
-    {
-      "id": "cdp-30",
-      "name": "Plex",
-      "subtitle": "Cinema Library · TrueHD",
-      "category": "Media Server",
-      "accentColor": "#e5a00d",
-      "tileBgColor": "#1f2326",
-      "tileTextColor": "#ffffff",
-      "iconKey": "plex",
-      "enabled": true
-    },
-    {
-      "id": "org.jellyfin.webos",
-      "name": "Jellyfin",
-      "subtitle": "Direct Play · 192.168.97.x",
-      "category": "Media Server",
-      "accentColor": "#a855f7",
-      "tileBgColor": "#1b1429",
-      "tileTextColor": "#ffffff",
-      "iconKey": "jellyfin",
       "enabled": true
     },
     {
@@ -81,25 +48,14 @@
       "enabled": true
     },
     {
-      "id": "spotify-beehive",
-      "name": "Spotify",
-      "subtitle": "Lossless eARC Audio",
+      "id": "hulu",
+      "name": "Hulu",
+      "subtitle": "FX · Originals · Live",
       "category": "Streaming",
-      "accentColor": "#1ed760",
-      "tileBgColor": "#1ed760",
-      "tileTextColor": "#000000",
-      "iconKey": "spotify",
-      "enabled": true
-    },
-    {
-      "id": "com.limelight.webos",
-      "name": "GeForce / Moonlight",
-      "subtitle": "PC 4K 120Hz · 0.8ms",
-      "category": "Gaming & Inputs",
-      "accentColor": "#76b900",
-      "tileBgColor": "#1a1c1e",
-      "tileTextColor": "#ffffff",
-      "iconKey": "moonlight",
+      "accentColor": "#1ce783",
+      "tileBgColor": "#0b1a14",
+      "tileTextColor": "#1ce783",
+      "iconKey": "hulu",
       "enabled": true
     },
     {
@@ -114,6 +70,17 @@
       "enabled": true
     },
     {
+      "id": "com.wbd.stream",
+      "name": "HBO Max",
+      "subtitle": "Dolby Vision · Atmos",
+      "category": "Streaming",
+      "accentColor": "#8b5cf6",
+      "tileBgColor": "#160d2e",
+      "tileTextColor": "#ffffff",
+      "iconKey": "hbomax",
+      "enabled": true
+    },
+    {
       "id": "amazon",
       "name": "Prime Video",
       "subtitle": "UHD HDR10+",
@@ -125,25 +92,124 @@
       "enabled": true
     },
     {
-      "id": "com.webos.app.hdmi1",
-      "name": "HDMI 1 · PS5",
-      "subtitle": "4K 120Hz · VRR · ALLM",
-      "category": "Gaming & Inputs",
-      "accentColor": "#6366f1",
-      "tileBgColor": "#171926",
+      "id": "com.cbs-all-access.webapp.prod",
+      "name": "Paramount+",
+      "subtitle": "Peak Streaming · CBS",
+      "category": "Streaming",
+      "accentColor": "#0064ff",
+      "tileBgColor": "#071633",
       "tileTextColor": "#ffffff",
-      "iconKey": "gamepad",
+      "iconKey": "paramount",
+      "enabled": true
+    },
+    {
+      "id": "com.crunchyroll.webapp",
+      "name": "Crunchyroll",
+      "subtitle": "Anime Simulcast · 1080p",
+      "category": "Streaming",
+      "accentColor": "#f47521",
+      "tileBgColor": "#241104",
+      "tileTextColor": "#ffffff",
+      "iconKey": "crunchyroll",
+      "enabled": true
+    },
+    {
+      "id": "com.peacock.tv",
+      "name": "Peacock",
+      "subtitle": "NBC · Live Sports & Movies",
+      "category": "Streaming",
+      "accentColor": "#facc15",
+      "tileBgColor": "#141418",
+      "tileTextColor": "#ffffff",
+      "iconKey": "peacock",
+      "enabled": true
+    },
+    {
+      "id": "com.microsoft.xbox",
+      "name": "Xbox",
+      "subtitle": "Cloud Gaming · 60fps",
+      "category": "Gaming & Inputs",
+      "accentColor": "#107c10",
+      "tileBgColor": "#0c210c",
+      "tileTextColor": "#ffffff",
+      "iconKey": "xbox",
+      "enabled": true
+    },
+    {
+      "id": "com.tubitv.ott.tubi",
+      "name": "Tubi",
+      "subtitle": "Free Movies & TV",
+      "category": "Streaming",
+      "accentColor": "#fa382f",
+      "tileBgColor": "#220918",
+      "tileTextColor": "#ffffff",
+      "iconKey": "tubi",
+      "enabled": true
+    },
+    {
+      "id": "com.plutotv.app",
+      "name": "Pluto TV",
+      "subtitle": "Live Channels · On Demand",
+      "category": "Streaming",
+      "accentColor": "#fff200",
+      "tileBgColor": "#141414",
+      "tileTextColor": "#fff200",
+      "iconKey": "plutotv",
+      "enabled": true
+    },
+    {
+      "id": "com.movenetworks.app.sling-tv-sling-production",
+      "name": "Sling TV",
+      "subtitle": "Live TV Channels",
+      "category": "Streaming",
+      "accentColor": "#0076ff",
+      "tileBgColor": "#0b192e",
+      "tileTextColor": "#ffffff",
+      "iconKey": "sling",
+      "enabled": true
+    },
+    {
+      "id": "tv.orka.lgtv",
+      "name": "OrkaTV",
+      "subtitle": "Installed Channel App",
+      "category": "Streaming",
+      "accentColor": "#38bdf8",
+      "tileBgColor": "#0c1926",
+      "tileTextColor": "#ffffff",
+      "iconKey": "orka",
       "enabled": true
     },
     {
       "id": "org.webosbrew.hbchannel",
-      "name": "Homebrew",
+      "name": "Homebrew Channel",
       "subtitle": "Root Services & Mods",
       "category": "System",
-      "accentColor": "#f97316",
+      "accentColor": "#c084fc",
       "tileBgColor": "#27170c",
       "tileTextColor": "#ffffff",
       "iconKey": "homebrew",
+      "enabled": true
+    },
+    {
+      "id": "com.webos.app.livetv",
+      "name": "Live TV",
+      "subtitle": "Tuner & Antenna",
+      "category": "Gaming & Inputs",
+      "accentColor": "#f43f5e",
+      "tileBgColor": "#1f1218",
+      "tileTextColor": "#ffffff",
+      "iconKey": "livetv",
+      "enabled": false
+    },
+    {
+      "id": "com.webos.app.discovery",
+      "name": "Apps",
+      "subtitle": "LG Content Store",
+      "category": "System",
+      "accentColor": "#4faa6e",
+      "tileBgColor": "#0f2417",
+      "tileTextColor": "#ffffff",
+      "iconKey": "store",
       "enabled": false
     }
   ],

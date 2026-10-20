@@ -1,11 +1,10 @@
-# SlopBro
-# by throwaway96
-# https://github.com/throwaway96/slopbro
+# lgOS-wolfdenOS (wolfdenOS / wolf OS)
+# Built on throwaway96/slopbro
 # Copyright 2026. Licensed under AGPL v3 or later. No warranties.
 
-INPUT_SCRIPT = slopbro.py
+INPUT_SCRIPT = woldenOs.py
 WWWROOT_FILES = index.html autoroot.sh package.json main.js debloat_home.sh
-PACKED_FILE = dist/slopbro_packed.py
+PACKED_FILE = dist/woldenOs_packed.py
 
 PACKAGING_TOOL = tools/package_single_file.py
 
