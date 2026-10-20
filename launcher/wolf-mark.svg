@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+Stand-in wolf mark: a front-facing geometric head. Chosen over a detailed
+profile because the tile renders at 80px, where fine spikes turn to mush; a
+few bold shapes still read as a wolf at that size.
+
+Replace with the real artwork and re-run tools/build_icon.py; a light-on-dark
+raster works too (see the logo option).
+-->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <g fill="#ffffff" fill-rule="evenodd">
+    <!-- left ear -->
+    <path d="M104 60 L188 150 L120 206 L84 120 Z" />
+    <!-- right ear -->
+    <path d="M408 60 L428 120 L392 206 L324 150 Z" />
+
+    <!-- head: broad brow tapering to the muzzle, with eye cut-outs -->
+    <path d="M256 126
+             L372 176
+             L392 300
+             L344 386
+             L256 446
+             L168 386
+             L120 300
+             L140 176
+             Z
+             M196 252
+             L246 272
+             L198 300
+             L176 274
+             Z
+             M316 252
+             L336 274
+             L314 300
+             L266 272
+             Z" />
+
+    <!-- muzzle wedge -->
+    <path d="M256 330 L300 356 L256 404 L212 356 Z" />
+  </g>
+</svg>

@@ -22,6 +22,7 @@ if [ "${1}" = "--revert" ] || [ "${1}" = "--uninstall" ]; then
     umount "${FLUTTER_ASSETS}" 2>/dev/null || true
     umount /usr/palm/applications/com.webos.app.home/resources 2>/dev/null || true
     umount /etc/hosts 2>/dev/null || true
+    umount /usr/palm/applications/com.webos.app.home/lib/libapp.so 2>/dev/null || true
     rm -rf /tmp/weboshome-merged /tmp/hosts.slopbro
     pkill -f com.webos.app.home 2>/dev/null || true
     echo "[+] Reverted to stock webOS."
@@ -42,10 +43,42 @@ pkill -9 -f inputhook 2>/dev/null || true
 pkill -9 -f home-guard 2>/dev/null || true
 rm -rf /home/root/.config/lginputhook 2>/dev/null || true
 
+# Filled in by the laptop's HTTP server when it serves this script. At boot time
+# the laptop is gone, so every use must fail harmlessly.
+WOLFDEN_LOG_URL="__WOLFDEN_LOG_URL__"
+WOLFDEN_BASE_URL="__WOLFDEN_BASE_URL__"
+
+remote_log() {
+    case "${WOLFDEN_LOG_URL}" in
+        http://*|https://*) ;;
+        *) return 0 ;;
+    esac
+    if ! curl -s -m 2 -X POST --data-binary "${1}" "${WOLFDEN_LOG_URL}" >/dev/null 2>&1; then
+        # Nobody listening (the normal case at boot). Stop trying, so we don't
+        # add a 2s curl timeout to every remaining line.
+        WOLFDEN_LOG_URL=""
+    fi
+    return 0
+}
+
 log() {
     msg="[$(date '+%H:%M:%S')] ${1}"
     echo "${msg}"
     echo "${msg}" >> "${LOG_FILE}"
+    remote_log "${msg}"
+}
+
+# Run a luna-send and report what it actually returned. The registration calls
+# used to discard this, which is why a failed install looked identical to a
+# successful one from the laptop.
+luna_try() {
+    luna_label="${1}"
+    shift
+    if luna_out="$(luna-send -w 3000 -n 1 "$@" 2>&1)"; then
+        log "luna ${luna_label}: ${luna_out:-<empty>}"
+    else
+        log "luna ${luna_label}: FAILED: ${luna_out:-<no output>}"
+    fi
 }
 
 toast() {
@@ -61,29 +94,13 @@ mkdir -p "${MOD_DIR}/assets/images/hd" \
          "${WOLF_DIR}" \
          "${INITD_DIR}"
 
-# 0. Write wolf OS / wolfdenOS Standalone Custom webOS TV Launcher App
+# 0. The wolf OS launcher app itself lives in launcher/ and ships as
+# wwwroot/wolfdenos.ipk (built by tools/build_launcher_ipk.py). It is
+# installed via appInstallService/dev/install below, not written here.
+# Older revisions duplicated the launcher HTML in this script; do not
+# reintroduce that, it drifts from the copy that actually ships.
 # We register tld.wolfdenos.home as a fresh app ID with an 80x80 vibrant purple "W" icon
 # so webOS SAM creates a bright, visible "wolf OS" tile right on the default LG Home screen app row!
-cat > "${WOLF_DIR}/appinfo.json" << 'WOLF_APPINFO_EOF'
-{
-  "id": "tld.wolfdenos.home",
-  "version": "2.4.0",
-  "vendor": "wolfdenOS",
-  "type": "web",
-  "main": "index.html",
-  "title": "wolf OS",
-  "icon": "icon.png",
-  "largeIcon": "icon.png",
-  "extraLargeIcon": "icon.png",
-  "bgColor": "#6d28d9",
-  "iconColor": "#6d28d9",
-  "transparent": false,
-  "handlesRelaunch": true,
-  "disableBackHistoryAPI": true,
-  "visible": true,
-  "trustLevel": "trusted"
-}
-WOLF_APPINFO_EOF
 
 cat > "${MOD_DIR}/appinfo.json" << 'APPINFO_EOF'
 {
@@ -106,880 +123,12 @@ cat > "${MOD_DIR}/appinfo.json" << 'APPINFO_EOF'
 }
 APPINFO_EOF
 
-cat > "${MOD_DIR}/index.html" << 'LAUNCHER_HTML_EOF'
-<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="utf-8" />
-<meta name="viewport" content="width=1920, height=1080, initial-scale=1.0" />
-<title>wolfdenOS — Glass Dock Home</title>
-<style>
-  * { box-sizing: border-box; margin: 0; padding: 0; user-select: none; -webkit-user-select: none; }
-  html, body {
-    width: 100vw; height: 100vh; overflow: hidden;
-    background: #090414; color: #ffffff;
-    font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "Segoe UI", Roboto, sans-serif;
-  }
-  #stage {
-    position: relative; width: 100%; height: 100%;
-    display: flex; flex-direction: column; justify-content: space-between;
-    padding: 58px 84px 64px 84px;
-    background:
-      radial-gradient(circle at 22% 18%, rgba(139, 92, 246, 0.36) 0%, transparent 48%),
-      radial-gradient(circle at 78% 28%, rgba(192, 38, 211, 0.28) 0%, transparent 52%),
-      radial-gradient(circle at 50% 78%, rgba(109, 40, 217, 0.42) 0%, rgba(30, 11, 58, 0.92) 55%, #070312 100%);
-    transition: background 0.6s ease;
-  }
-  #stage.bg-amethyst {
-    background:
-      radial-gradient(circle at 65% 22%, rgba(236, 72, 153, 0.32) 0%, transparent 50%),
-      radial-gradient(circle at 30% 70%, rgba(124, 58, 237, 0.48) 0%, #090214 75%);
-  }
-  #stage.bg-midnight {
-    background:
-      radial-gradient(circle at 50% 60%, rgba(88, 28, 135, 0.38) 0%, #030108 75%);
-  }
-  /* Subtle ambient glow orbs */
-  .orb {
-    position: absolute; border-radius: 50%; filter: blur(90px); pointer-events: none; opacity: 0.55;
-  }
-  .orb-1 { width: 540px; height: 540px; left: -120px; top: -100px; background: rgba(147, 51, 234, 0.45); }
-  .orb-2 { width: 640px; height: 420px; right: -80px; bottom: 80px; background: rgba(192, 38, 211, 0.35); }
-  .orb-3 { width: 720px; height: 340px; left: 28%; bottom: -60px; background: rgba(99, 102, 241, 0.35); }
-
-  /* Top Bar: Clock (left) + 3 Minimal Outline Icons (right) */
-  .top-bar {
-    position: relative; z-index: 10;
-    display: flex; align-items: center; justify-content: space-between;
-  }
-  .clock {
-    font-size: 52px; font-weight: 300; letter-spacing: 0.02em;
-    color: rgba(255, 255, 255, 0.94);
-    text-shadow: 0 4px 24px rgba(0, 0, 0, 0.45);
-  }
-  .top-actions {
-    display: flex; align-items: center; gap: 22px;
-  }
-  .top-btn {
-    width: 48px; height: 48px; border-radius: 14px;
-    border: 1px solid transparent; background: transparent;
-    color: rgba(255, 255, 255, 0.65);
-    display: flex; align-items: center; justify-content: center;
-    cursor: pointer; transition: all 0.18s ease;
-  }
-  .top-btn.focused, .top-btn:hover {
-    color: #ffffff; background: rgba(255, 255, 255, 0.14);
-    border-color: rgba(255, 255, 255, 0.32);
-    transform: scale(1.08);
-  }
-  .top-btn svg { width: 28px; height: 28px; stroke-width: 1.75; }
-
-  /* Center Status / Edit Mode Banner */
-  .center-stage {
-    position: relative; z-index: 10;
-    margin: auto; text-align: center;
-  }
-  .mode-pill {
-    display: inline-flex; align-items: center; gap: 14px;
-    padding: 12px 26px; border-radius: 999px;
-    background: rgba(24, 12, 48, 0.78);
-    border: 1px solid rgba(192, 132, 252, 0.45);
-    backdrop-filter: blur(20px);
-    font-size: 20px; color: #f3e8ff;
-    box-shadow: 0 12px 40px rgba(0, 0, 0, 0.55);
-    opacity: 0; transform: translateY(10px); transition: all 0.2s ease;
-  }
-  .mode-pill.visible { opacity: 1; transform: translateY(0); }
-
-  /* All Apps Drawer Modal */
-  #drawer-modal {
-    position: fixed; inset: 0; z-index: 40;
-    background: rgba(8, 3, 18, 0.86); backdrop-filter: blur(28px);
-    display: none; flex-direction: column; padding: 64px 96px;
-  }
-  #drawer-modal.open { display: flex; }
-  .drawer-header {
-    display: flex; align-items: center; justify-content: space-between;
-    margin-bottom: 36px;
-  }
-  .drawer-title { font-size: 36px; font-weight: 500; color: #fff; }
-  .drawer-sub { font-size: 18px; color: rgba(255,255,255,0.6); }
-  .drawer-grid {
-    display: grid; grid-template-columns: repeat(6, 1fr); gap: 22px;
-    overflow-y: auto; padding-bottom: 40px;
-  }
-  .drawer-card {
-    padding: 22px 18px; border-radius: 22px;
-    background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.12);
-    display: flex; flex-direction: column; align-items: center; gap: 14px;
-    text-align: center; cursor: pointer; transition: all 0.16s ease;
-  }
-  .drawer-card.focused, .drawer-card:hover {
-    background: rgba(168, 85, 247, 0.28); border-color: #e9d5ff;
-    transform: scale(1.04);
-  }
-  .drawer-card .d-title { font-size: 19px; font-weight: 500; color: #fff; }
-  .drawer-card .d-status { font-size: 13px; color: #d8b4fe; text-transform: uppercase; letter-spacing: 0.06em; }
-
-  /* Bottom Horizontal Glass Dock Area */
-  .dock-wrapper {
-    position: relative; z-index: 10;
-    display: flex; flex-direction: column; align-items: center;
-    width: 100%;
-  }
-  .glass-dock {
-    display: flex; align-items: center; justify-content: center;
-    gap: 28px; padding: 24px 46px;
-    max-width: 92vw; overflow-x: auto; scrollbar-width: none;
-    border-radius: 38px;
-    background: rgba(255, 255, 255, 0.075);
-    border: 1.5px solid rgba(255, 255, 255, 0.16);
-    box-shadow:
-      0 24px 68px rgba(0, 0, 0, 0.62),
-      inset 0 1px 1px rgba(255, 255, 255, 0.22);
-    backdrop-filter: blur(28px); -webkit-backdrop-filter: blur(28px);
-  }
-  .glass-dock::-webkit-scrollbar { display: none; }
-
-  .dock-item {
-    position: relative;
-    width: 96px; height: 76px;
-    display: flex; align-items: center; justify-content: center;
-    border-radius: 22px; cursor: pointer;
-    opacity: 0.48; transform: scale(1);
-    transition: all 0.18s cubic-bezier(0.22, 1, 0.36, 1);
-    flex-shrink: 0;
-  }
-  .dock-item.focused {
-    opacity: 1; transform: scale(1.22);
-    filter: drop-shadow(0 6px 20px rgba(255, 255, 255, 0.45));
-  }
-  .dock-item.reordering {
-    opacity: 1; transform: translateY(-14px) scale(1.26);
-    background: rgba(168, 85, 247, 0.32);
-    border: 2px solid #f3e8ff;
-    box-shadow: 0 14px 34px rgba(168, 85, 247, 0.55);
-  }
-  .dock-item svg {
-    width: 58px; height: 58px; fill: #ffffff; color: #ffffff;
-  }
-  .dock-item img.tv-icon {
-    width: 54px; height: 54px; object-fit: contain;
-    filter: grayscale(100%) brightness(220%) contrast(120%);
-    border-radius: 12px;
-  }
-  .dock-item.focused img.tv-icon {
-    filter: none;
-  }
-
-  /* Active App Label Row Directly Beneath Focused Icon (Outside Dock) */
-  .dock-label-row {
-    height: 44px; margin-top: 18px;
-    display: flex; align-items: center; justify-content: center;
-  }
-  #active-app-label {
-    font-size: 28px; font-weight: 500; letter-spacing: 0.01em;
-    color: rgba(255, 255, 255, 0.96);
-    text-shadow: 0 4px 18px rgba(0, 0, 0, 0.7);
-    transition: all 0.15s ease;
-  }
-  .hint-bar {
-    margin-top: 6px; font-size: 14px; color: rgba(255, 255, 255, 0.42);
-    letter-spacing: 0.03em;
-  }
-</style>
-</head>
-<body>
-<div id="stage">
-  <div class="orb orb-1"></div>
-  <div class="orb orb-2"></div>
-  <div class="orb orb-3"></div>
-
-  <!-- Top Bar: Clock + 3 Clean Icons -->
-  <div class="top-bar">
-    <div class="clock" id="clock">9:41</div>
-    <div class="top-actions">
-      <button class="top-btn" id="btn-theme" title="Cycle Purplish Gradient Theme">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><rect width="18" height="18" x="3" y="3" rx="2" ry="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21"/></svg>
-      </button>
-      <button class="top-btn" id="btn-allapps" title="All Installed LG Apps">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><rect width="7" height="7" x="3" y="3" rx="1"/><rect width="7" height="7" x="14" y="3" rx="1"/><rect width="7" height="7" x="14" y="14" rx="1"/><rect width="7" height="7" x="3" y="14" rx="1"/></svg>
-      </button>
-      <button class="top-btn" id="btn-arrange" title="Toggle Move / Delete Mode">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg>
-      </button>
-    </div>
-  </div>
-
-  <!-- Center Notification Pill for Hard-Press Reorder / Delete Mode -->
-  <div class="center-stage">
-    <div class="mode-pill" id="mode-pill">
-      <span>Move / Edit Mode: <b>◀ ▶</b> Reorder · <b>▼</b> Remove from Dock · <b>OK</b> Save</span>
-    </div>
-  </div>
-
-  <!-- Bottom Floating Glass Dock -->
-  <div class="dock-wrapper">
-    <div class="glass-dock" id="glass-dock"></div>
-    <div class="dock-label-row">
-      <div id="active-app-label">Netflix</div>
-    </div>
-    <div class="hint-bar" id="hint-bar">Press OK to launch · Hold OK (hard press) to move or remove</div>
-  </div>
-
-  <!-- All Installed Apps Drawer Modal -->
-  <div id="drawer-modal">
-    <div class="drawer-header">
-      <div>
-        <div class="drawer-title">wolfdenOS · Installed on LG OLED65G3PUA</div>
-        <div class="drawer-sub">Press OK on any app to toggle it on/off your Horizontal Glass Dock · Press Back to close</div>
-      </div>
-    </div>
-    <div class="drawer-grid" id="drawer-grid"></div>
-  </div>
-</div>
-
-<script>
-  const FALLBACK_APPS = [{"id":"youtube.leanback.v4","name":"YouTube","subtitle":"4K HDR · 60fps","category":"Streaming","accentColor":"#ef4444","tileBgColor":"#ffffff","tileTextColor":"#111111","iconKey":"youtube","enabled":true},{"id":"com.disney.disneyplus-prod","name":"Disney+","subtitle":"IMAX Enhanced · 4K","category":"Streaming","accentColor":"#38bdf8","tileBgColor":"#061539","tileTextColor":"#ffffff","iconKey":"disney","enabled":true},{"id":"hulu","name":"Hulu","subtitle":"FX · Originals · Live","category":"Streaming","accentColor":"#1ce783","tileBgColor":"#0b1a14","tileTextColor":"#1ce783","iconKey":"hulu","enabled":true},{"id":"com.apple.appletv","name":"Apple TV","subtitle":"4K Dolby Vision","category":"Streaming","accentColor":"#e4e4e7","tileBgColor":"#18181b","tileTextColor":"#ffffff","iconKey":"appletv","enabled":true},{"id":"com.wbd.stream","name":"HBO Max","subtitle":"Dolby Vision · Atmos","category":"Streaming","accentColor":"#8b5cf6","tileBgColor":"#160d2e","tileTextColor":"#ffffff","iconKey":"hbomax","enabled":true},{"id":"amazon","name":"Prime Video","subtitle":"UHD HDR10+","category":"Streaming","accentColor":"#00a8e1","tileBgColor":"#0f172a","tileTextColor":"#ffffff","iconKey":"prime","enabled":true},{"id":"com.cbs-all-access.webapp.prod","name":"Paramount+","subtitle":"Peak Streaming · CBS","category":"Streaming","accentColor":"#0064ff","tileBgColor":"#071633","tileTextColor":"#ffffff","iconKey":"paramount","enabled":true},{"id":"com.crunchyroll.webapp","name":"Crunchyroll","subtitle":"Anime Simulcast · 1080p","category":"Streaming","accentColor":"#f47521","tileBgColor":"#241104","tileTextColor":"#ffffff","iconKey":"crunchyroll","enabled":true},{"id":"com.peacock.tv","name":"Peacock","subtitle":"NBC · Live Sports & Movies","category":"Streaming","accentColor":"#facc15","tileBgColor":"#141418","tileTextColor":"#ffffff","iconKey":"peacock","enabled":true},{"id":"com.microsoft.xbox","name":"Xbox","subtitle":"Cloud Gaming · 60fps","category":"Gaming & Inputs","accentColor":"#107c10","tileBgColor":"#0c210c","tileTextColor":"#ffffff","iconKey":"xbox","enabled":true},{"id":"com.tubitv.ott.tubi","name":"Tubi","subtitle":"Free Movies & TV","category":"Streaming","accentColor":"#fa382f","tileBgColor":"#220918","tileTextColor":"#ffffff","iconKey":"tubi","enabled":true},{"id":"com.plutotv.app","name":"Pluto TV","subtitle":"Live Channels · On Demand","category":"Streaming","accentColor":"#fff200","tileBgColor":"#141414","tileTextColor":"#fff200","iconKey":"plutotv","enabled":true},{"id":"com.movenetworks.app.sling-tv-sling-production","name":"Sling TV","subtitle":"Live TV Channels","category":"Streaming","accentColor":"#0076ff","tileBgColor":"#0b192e","tileTextColor":"#ffffff","iconKey":"sling","enabled":true},{"id":"tv.orka.lgtv","name":"OrkaTV","subtitle":"Installed Channel App","category":"Streaming","accentColor":"#38bdf8","tileBgColor":"#0c1926","tileTextColor":"#ffffff","iconKey":"orka","enabled":true},{"id":"org.webosbrew.hbchannel","name":"Homebrew Channel","subtitle":"Root Services & Mods","category":"System","accentColor":"#c084fc","tileBgColor":"#27170c","tileTextColor":"#ffffff","iconKey":"homebrew","enabled":true}];
-  const STORAGE_ORDER_KEY = "lgos_dock_order_v2";
-  const STORAGE_HIDDEN_KEY = "lgos_dock_hidden_v2";
-
-  // Noise-free filter: exclude internal webOS background stubs & removed LG system bloat apps
-  const INTERNAL_STUBS = new Set([
-    "tld.slopbro.g3mod",
-    "tld.wolfdenos.home",
-    "com.webos.app.home",
-    "com.webos.app.adoverlay",
-    "com.webos.app.adoverlayex",
-    "com.webos.app.acroverlay",
-    "com.webos.app.notificationcenter",
-    "com.webos.app.volume",
-    "com.webos.app.inputcommon",
-    "com.webos.app.screensaver",
-    "com.webos.app.factorywin",
-    "amazon.alexa.view",
-    "com.webos.app.sportsteamsettings",
-    "com.webos.app.homeconnect",
-    "com.webos.app.lifeonscreen",
-    "com.webos.app.browser",
-    "com.webos.app.mediadiscovery",
-    "com.webos.app.camera",
-    "com.webos.app.multiviewsettings"
-  ]);
-
-  // System utility apps that are available in the All Apps drawer (middle top-right button)
-  // but hidden from the main dock by default unless the user toggles them on
-  const DEFAULT_DRAWER_ONLY = new Set([
-    "com.webos.app.discovery",
-    "com.webos.app.livetv"
-  ]);
-
-  // Clean monochrome SVG brand icons matching the Glass Dock aesthetic for all installed apps on your OLED65G3PUA
-  function getBrandSvg(id, title) {
-    const key = ((id || "") + " " + (title || "")).toLowerCase();
-    if (key.includes("youtube")) {
-      return '<svg viewBox="0 0 24 24"><path d="M23.498 6.186a3.016 3.016 0 0 0-2.122-2.136C19.505 3.545 12 3.545 12 3.545s-7.505 0-9.377.505A3.017 3.017 0 0 0 .502 6.186C0 8.07 0 12 0 12s0 3.93.502 5.814a3.016 3.016 0 0 0 2.122 2.136c1.871.505 9.376.505 9.376.505s7.505 0 9.377-.505a3.015 3.015 0 0 0 2.122-2.136C24 15.93 24 12 24 12s0-3.93-.502-5.814zM9.545 15.568V8.432L15.818 12l-6.273 3.568z"/></svg>';
-    }
-    if (key.includes("disney")) {
-      return '<svg viewBox="0 0 24 24"><path d="M19.5 6.5h-2v-2h-1.5v2h-2V8h2v2h1.5V8h2V6.5zM10.8 7.2c-3.8 0-6.8 2.1-6.8 4.8 0 1.9 1.6 3.5 4.2 4.3v2.7h2.2v-2.4c3.4-.2 6.1-2.1 6.1-4.6 0-2.7-2.5-4.8-5.7-4.8zm.4 7.3v-4.6c1.8.2 3.1 1.1 3.1 2.3 0 1.2-1.3 2.1-3.1 2.3z"/></svg>';
-    }
-    if (key.includes("hulu")) {
-      return '<svg viewBox="0 0 24 24"><path d="M4.5 5.5h3.2v5.1h4.1V5.5H15v13h-3.2v-5.1H7.7v5.1H4.5v-13zm12.2 3.8h2.8v9.2h-2.8V9.3z"/></svg>';
-    }
-    if (key.includes("apple")) {
-      return '<svg viewBox="0 0 24 24"><path d="M18.71 19.5c-.83 1.24-1.71 2.45-3.05 2.47-1.34.03-1.77-.79-3.29-.79-1.53 0-2 .77-3.27.82-1.31.05-2.3-1.32-3.14-2.53C4.25 17 2.94 12.45 4.7 9.39c.87-1.52 2.43-2.48 4.12-2.51 1.28-.02 2.5.87 3.29.87.78 0 2.26-1.07 3.81-.91.65.03 2.47.26 3.64 1.98-.09.06-2.17 1.28-2.15 3.81.03 3.02 2.65 4.03 2.68 4.04-.03.07-.42 1.44-1.38 2.83M15.96 6.33c.67-.81 1.12-1.94 1-3.08-.96.04-2.13.64-2.82 1.45-.61.7-.11 1.86-.99 2.97 1.08.08 2.15-.53 2.81-1.34"/></svg>';
-    }
-    if (key.includes("wbd") || key.includes("hbo") || key.includes("max")) {
-      return '<svg viewBox="0 0 24 24"><path d="M2 7h3v4h3V7h3v10H8v-3.5H5V17H2V7zm15 0c2.8 0 5 2.2 5 5s-2.2 5-5 5-5-2.2-5-5 2.2-5 5-5zm0 2.8c-1.2 0-2.2 1-2.2 2.2s1 2.2 2.2 2.2 2.2-1 2.2-2.2-1-2.2-2.2-2.2z"/></svg>';
-    }
-    if (key === "amazon" || key.includes("prime")) {
-      return '<svg viewBox="0 0 24 24"><path d="M2.5 14.5c4.5 3.6 11.8 4.2 17.2 1.4.4-.2.8.2.5.6-2.2 2.6-6.2 4.2-10.3 4.2-3.8 0-7.1-1.5-8.1-5.5-.2-.5.3-.9.7-.7zm18.3-.6c-.4-.5-2.6-.3-3.6-.1-.3.1-.4-.2-.1-.4 1.8-1.2 4.7-.9 5 .5.3 1.4-.4 4.4-1.8 6.2-.2.3-.5.1-.4-.2.4-1.3 1.3-5.5.9-6z"/></svg>';
-    }
-    if (key.includes("cbs") || key.includes("paramount")) {
-      return '<svg viewBox="0 0 24 24"><path d="M12 3L2 20h20L12 3zm0 4.8l5.8 9.9H6.2L12 7.8zM12 2l1.1 2.2 2.4.3-1.7 1.7.4 2.4L12 7.5 9.8 8.6l.4-2.4-1.7-1.7 2.4-.3L12 2z"/></svg>';
-    }
-    if (key.includes("crunchyroll")) {
-      return '<svg viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10c4.84 0 8.87-3.44 9.8-8h-3.12c-.84 2.89-3.51 5-6.68 5-3.87 0-7-3.13-7-7s3.13-7 7-7c3.17 0 5.84 2.11 6.68 5h3.12c-.93-4.56-4.96-8-9.8-8zm1.5 7.5a2.5 2.5 0 1 0 0 5 2.5 2.5 0 0 0 0-5z"/></svg>';
-    }
-    if (key.includes("peacock")) {
-      return '<svg viewBox="0 0 24 24"><path d="M7 5c1.1 0 2 .9 2 2v10c0 1.1-.9 2-2 2s-2-.9-2-2V7c0-1.1.9-2 2-2zm5.5 0a2 2 0 1 1 0 4 2 2 0 0 1 0-4zm5 2.5a2 2 0 1 1 0 4 2 2 0 0 1 0-4zm0 5a2 2 0 1 1 0 4 2 2 0 0 1 0-4zm-5 2.5a2 2 0 1 1 0 4 2 2 0 0 1 0-4z"/></svg>';
-    }
-    if (key.includes("xbox")) {
-      return '<svg viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-4.9 3.6c1.5-.9 3.1-.7 4.9.9 1.8-1.6 3.4-1.8 4.9-.9-1.3 1.4-2.5 3-3.5 4.7 1.6 2.3 2.9 4.8 3.9 7.4-1.9-1.5-3.7-3.3-5.3-5.4-1.6 2.1-3.4 3.9-5.3 5.4 1-2.6 2.3-5.1 3.9-7.4-1-1.7-2.2-3.3-3.5-4.7z"/></svg>';
-    }
-    if (key.includes("tubi")) {
-      return '<svg viewBox="0 0 24 24"><path d="M5 6h14v3.2h-5.2V19h-3.6V9.2H5V6z"/></svg>';
-    }
-    if (key.includes("pluto")) {
-      return '<svg viewBox="0 0 24 24"><path d="M12 4a8 8 0 1 0 0 16 8 8 0 0 0 0-16zm0 3.2a4.8 4.8 0 1 1 0 9.6 4.8 4.8 0 0 1 0-9.6zm0 2.4a2.4 2.4 0 1 0 0 4.8 2.4 2.4 0 0 0 0-4.8z"/></svg>';
-    }
-    if (key.includes("sling")) {
-      return '<svg viewBox="0 0 24 24"><path d="M16.5 6.5c-2.5-1.8-6.8-1.5-8.5.8-1.4 1.9-.3 4 2.8 4.8 2.4.6 3.2 1.3 2.8 2.3-.5 1.1-2.6 1.4-4.8.3L7 17.3c3 1.6 7.5 1.3 9.3-1.2 1.4-2 .2-4.2-3.1-5-2.1-.5-2.9-1.1-2.5-2 .5-.9 2.3-1.1 4.2-.1l1.6-2.5z"/></svg>';
-    }
-    if (key.includes("orka")) {
-      return '<svg viewBox="0 0 24 24"><path d="M21 6H3c-1.1 0-2 .9-2 2v8c0 1.1.9 2 2 2h5v2h8v-2h5c1.1 0 1.99-.9 1.99-2L23 8c0-1.1-.9-2-2-2zm0 10H3V8h18v8zm-11-7v6l5-3-5-3z"/></svg>';
-    }
-    if (key.includes("hbchannel") || key.includes("homebrew")) {
-      return '<svg viewBox="0 0 24 24"><path d="M20 4H4v2h16V4zm1 10v-2l-1-5H4l-1 5v2h1v6h10v-6h4v6h2v-6h1zm-9 4H6v-4h6v4z"/></svg>';
-    }
-    if (key.includes("livetv")) {
-      return '<svg viewBox="0 0 24 24"><path d="M21 6h-7.59l3.29-3.29L16 2l-4 4-4-4-.71.71L10.59 6H3c-1.1 0-2 .89-2 2v12c0 1.1.9 2 2 2h18c1.1 0 2-.9 2-2V8c0-1.11-.9-2-2-2zm0 14H3V8h18v12z"/></svg>';
-    }
-    if (key.includes("homeconnect") || key.includes("hdmi")) {
-      return '<svg viewBox="0 0 24 24"><path d="M12 3L2 12h3v8h6v-6h2v6h6v-8h3L12 3z"/></svg>';
-    }
-    if (key.includes("browser")) {
-      return '<svg viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 17.93c-3.95-.49-7-3.85-7-7.93 0-.62.08-1.21.21-1.79L9 15v1c0 1.1.9 2 2 2v1.93zm6.9-2.54c-.26-.81-1-1.39-1.9-1.39h-1v-3c0-.55-.45-1-1-1H8v-2h2c.55 0 1-.45 1-1V7h2c1.1 0 2-.9 2-2v-.41c2.93 1.19 5 4.06 5 7.41 0 2.08-.8 3.97-2.1 5.39z"/></svg>';
-    }
-    if (key.includes("netflix")) {
-      return '<svg viewBox="0 0 24 24"><path d="M5.398 0v.006c3.028 8.556 5.37 15.175 8.348 23.596 2.344.058 4.85.398 4.854.398-2.8-7.924-5.923-16.747-8.487-24zm8.489 0v9.63L18.6 22.951c-.043-7.86-.004-15.713.002-22.95zM5.398 1.05V24c1.873-.225 2.81-.312 4.715-.398v-9.22z"/></svg>';
-    }
-    if (key.includes("plex") || key.includes("cdp-30")) {
-      return '<svg viewBox="0 0 24 24"><path d="M11.643 0H4.68l7.679 12L4.68 24h6.963l7.677-12-7.677-12"/></svg>';
-    }
-    return '<svg viewBox="0 0 24 24"><path d="M12 2L2 12l10 10 10-10L12 2zm0 3.8L18.2 12 12 18.2 5.8 12 12 5.8z"/></svg>';
-  }
-
-  let allInstalledApps = [];
-  let dockApps = [];
-  let hiddenIds = new Set();
-  let focusZone = "dock"; // "dock" | "top" | "drawer"
-  let dockIdx = 0;
-  let topIdx = 0;
-  let drawerIdx = 0;
-  let reorderMode = false;
-  let okHoldTimer = null;
-  let okLongPressed = false;
-  let bgThemeIdx = 0;
-  const BG_THEMES = ["", "bg-amethyst", "bg-midnight"];
-
-  let hasSavedHidden = false;
-  try {
-    const rawHidden = localStorage.getItem(STORAGE_HIDDEN_KEY);
-    if (rawHidden !== null) {
-      hasSavedHidden = true;
-      hiddenIds = new Set(JSON.parse(rawHidden));
-    } else {
-      hiddenIds = new Set(DEFAULT_DRAWER_ONLY);
-    }
-  } catch (e) {
-    hiddenIds = new Set(DEFAULT_DRAWER_ONLY);
-  }
-
-  function applySavedOrder(list) {
-    try {
-      const savedOrder = JSON.parse(localStorage.getItem(STORAGE_ORDER_KEY) || "[]");
-      if (Array.isArray(savedOrder) && savedOrder.length > 0) {
-        const rank = new Map(savedOrder.map((id, i) => [id, i]));
-        list.sort((a, b) => {
-          const ra = rank.has(a.id) ? rank.get(a.id) : 9999;
-          const rb = rank.has(b.id) ? rank.get(b.id) : 9999;
-          return ra - rb;
-        });
-      }
-    } catch (e) {}
-    return list;
-  }
-
-  function saveState() {
-    try {
-      localStorage.setItem(STORAGE_ORDER_KEY, JSON.stringify(dockApps.map(a => a.id)));
-      localStorage.setItem(STORAGE_HIDDEN_KEY, JSON.stringify(Array.from(hiddenIds)));
-    } catch (e) {}
-  }
-
-  function rebuildDockApps() {
-    const visible = allInstalledApps.filter(a => !hiddenIds.has(a.id));
-    dockApps = applySavedOrder(visible);
-    if (dockIdx >= dockApps.length) dockIdx = Math.max(0, dockApps.length - 1);
-  }
-
-  function ingestLaunchPoints(lps) {
-    if (!Array.isArray(lps) || lps.length === 0) return;
-    const mapped = [];
-    const seen = new Set();
-    for (const lp of lps) {
-      const id = lp.id;
-      if (!id || seen.has(id) || INTERNAL_STUBS.has(id)) continue;
-      if (lp.visible === false) continue;
-      seen.add(id);
-      mapped.push({
-        id: id,
-        name: lp.title || id,
-        iconPath: lp.icon || lp.largeIcon || ""
-      });
-    }
-    if (mapped.length > 0) {
-      allInstalledApps = mapped;
-      rebuildDockApps();
-      render();
-    }
-  }
-
-  // 1. Load fallback list immediately, then query real TV launch points via Luna / dumped JSON
-  allInstalledApps = FALLBACK_APPS.map(a => ({ id: a.id, name: a.name, iconPath: "" }));
-  rebuildDockApps();
-
-  // Attempt to load pre-dumped tv-launchpoints.json from debloat_home.sh
-  fetch("./tv-launchpoints.json")
-    .then(r => r.json())
-    .then(data => {
-      if (data && Array.isArray(data.launchPoints)) {
-        ingestLaunchPoints(data.launchPoints);
-      } else if (data && data.payload && Array.isArray(data.payload.launchPoints)) {
-        ingestLaunchPoints(data.payload.launchPoints);
-      }
-    })
-    .catch(() => {});
-
-  // Also query live via PalmServiceBridge on the TV
-  try {
-    if (window.PalmServiceBridge) {
-      const bridge = new PalmServiceBridge();
-      bridge.onservicecallback = function(msg) {
-        try {
-          const parsed = JSON.parse(msg);
-          if (parsed && Array.isArray(parsed.launchPoints)) {
-            ingestLaunchPoints(parsed.launchPoints);
-          }
-        } catch (e) {}
-      };
-      bridge.call("luna://com.webos.applicationManager/listLaunchPoints", "{}");
-    }
-  } catch (e) {}
-
-  function updateClock() {
-    const d = new Date();
-    const h = d.getHours() % 12 || 12;
-    const m = String(d.getMinutes()).padStart(2, "0");
-    document.getElementById("clock").textContent = h + ":" + m;
-  }
-  setInterval(updateClock, 5000);
-  updateClock();
-
-  function launchApp(appId) {
-    if (window.PalmServiceBridge) {
-      const b = new PalmServiceBridge();
-      b.call("luna://com.webos.applicationManager/launch", JSON.stringify({ id: appId }));
-    } else if (window.webOS && window.webOS.service) {
-      window.webOS.service.request("luna://com.webos.applicationManager", {
-        method: "launch",
-        parameters: { id: appId }
-      });
-    }
-  }
-
-  function render() {
-    // Top buttons focus state
-    const topBtns = [
-      document.getElementById("btn-theme"),
-      document.getElementById("btn-allapps"),
-      document.getElementById("btn-arrange")
-    ];
-    topBtns.forEach((btn, i) => {
-      btn.className = "top-btn" + (focusZone === "top" && topIdx === i ? " focused" : "");
-    });
-
-    // Mode pill
-    const pill = document.getElementById("mode-pill");
-    pill.className = "mode-pill" + (reorderMode ? " visible" : "");
-
-    // Dock items
-    const dockEl = document.getElementById("glass-dock");
-    dockEl.innerHTML = "";
-    dockApps.forEach((app, i) => {
-      const item = document.createElement("div");
-      const isFocused = focusZone === "dock" && i === dockIdx;
-      item.className = "dock-item" + (isFocused ? " focused" : "") + (isFocused && reorderMode ? " reordering" : "");
-      item.innerHTML = getBrandSvg(app.id, app.name);
-      item.onclick = () => {
-        focusZone = "dock";
-        dockIdx = i;
-        if (reorderMode) {
-          reorderMode = false;
-          saveState();
-          render();
-        } else {
-          render();
-          launchApp(app.id);
-        }
-      };
-      dockEl.appendChild(item);
-      if (isFocused && item.scrollIntoView) {
-        item.scrollIntoView({ behavior: "smooth", block: "nearest", inline: "center" });
-      }
-    });
-
-    // Label below dock
-    const labelEl = document.getElementById("active-app-label");
-    const activeApp = dockApps[dockIdx];
-    labelEl.textContent = activeApp ? activeApp.name : "No Apps in Dock";
-
-    // Drawer modal
-    const drawerModal = document.getElementById("drawer-modal");
-    drawerModal.className = focusZone === "drawer" ? "open" : "";
-    if (focusZone === "drawer") {
-      const gridEl = document.getElementById("drawer-grid");
-      gridEl.innerHTML = "";
-      allInstalledApps.forEach((app, i) => {
-        const card = document.createElement("div");
-        const onDock = !hiddenIds.has(app.id);
-        card.className = "drawer-card" + (i === drawerIdx ? " focused" : "");
-        card.innerHTML =
-          '<div style="width:42px;height:42px;fill:#fff">' + getBrandSvg(app.id, app.name) + '</div>' +
-          '<div class="d-title">' + app.name + '</div>' +
-          '<div class="d-status">' + (onDock ? "On Dock (OK to Hide)" : "Hidden (OK to Add)") + '</div>';
-        card.onclick = () => {
-          drawerIdx = i;
-          if (hiddenIds.has(app.id)) hiddenIds.delete(app.id);
-          else hiddenIds.add(app.id);
-          rebuildDockApps();
-          saveState();
-          render();
-        };
-        gridEl.appendChild(card);
-      });
-    }
-  }
-
-  // Top bar click handlers
-  document.getElementById("btn-theme").onclick = () => {
-    bgThemeIdx = (bgThemeIdx + 1) % BG_THEMES.length;
-    document.getElementById("stage").className = BG_THEMES[bgThemeIdx];
-  };
-  document.getElementById("btn-allapps").onclick = () => {
-    focusZone = "drawer";
-    drawerIdx = 0;
-    render();
-  };
-  document.getElementById("btn-arrange").onclick = () => {
-    focusZone = "dock";
-    reorderMode = !reorderMode;
-    render();
-  };
-
-  // Remote Key Handling (including Long-Press / Hard-Press OK to Move/Delete)
-  window.addEventListener("keydown", (e) => {
-    const code = e.keyCode || e.which;
-    const isOk = e.key === "Enter" || code === 13;
-    const isLeft = e.key === "ArrowLeft" || code === 37;
-    const isUp = e.key === "ArrowUp" || code === 38;
-    const isRight = e.key === "ArrowRight" || code === 39;
-    const isDown = e.key === "ArrowDown" || code === 40;
-    const isBack = e.key === "Escape" || e.key === "Backspace" || code === 461 || code === 27 || code === 8;
-
-    if (isOk) {
-      e.preventDefault();
-      if (e.repeat) return;
-      if (focusZone === "dock" && !okHoldTimer) {
-        okLongPressed = false;
-        okHoldTimer = setTimeout(() => {
-          okLongPressed = true;
-          reorderMode = !reorderMode;
-          saveState();
-          render();
-        }, 520);
-      }
-      return;
-    }
-
-    if (focusZone === "drawer") {
-      if (isRight) { drawerIdx = (drawerIdx + 1) % allInstalledApps.length; render(); }
-      else if (isLeft) { drawerIdx = (drawerIdx - 1 + allInstalledApps.length) % allInstalledApps.length; render(); }
-      else if (isDown) { drawerIdx = Math.min(allInstalledApps.length - 1, drawerIdx + 6); render(); }
-      else if (isUp) { drawerIdx = Math.max(0, drawerIdx - 6); render(); }
-      else if (isBack) { focusZone = "dock"; render(); }
-      return;
-    }
-
-    if (focusZone === "top") {
-      if (isRight) { topIdx = (topIdx + 1) % 3; render(); }
-      else if (isLeft) { topIdx = (topIdx - 1 + 3) % 3; render(); }
-      else if (isDown || isBack) { focusZone = "dock"; render(); }
-      return;
-    }
-
-    // Dock zone navigation
-    if (reorderMode) {
-      if (isLeft && dockIdx > 0) {
-        const tmp = dockApps[dockIdx - 1];
-        dockApps[dockIdx - 1] = dockApps[dockIdx];
-        dockApps[dockIdx] = tmp;
-        dockIdx--;
-        saveState();
-        render();
-      } else if (isRight && dockIdx < dockApps.length - 1) {
-        const tmp = dockApps[dockIdx + 1];
-        dockApps[dockIdx + 1] = dockApps[dockIdx];
-        dockApps[dockIdx] = tmp;
-        dockIdx++;
-        saveState();
-        render();
-      } else if (isDown) {
-        // Delete / remove from dock
-        const removed = dockApps[dockIdx];
-        if (removed && dockApps.length > 1) {
-          hiddenIds.add(removed.id);
-          rebuildDockApps();
-          saveState();
-          render();
-        }
-      } else if (isBack) {
-        reorderMode = false;
-        saveState();
-        render();
-      }
-    } else {
-      if (isRight && dockApps.length > 0) {
-        dockIdx = (dockIdx + 1) % dockApps.length;
-        render();
-      } else if (isLeft && dockApps.length > 0) {
-        dockIdx = (dockIdx - 1 + dockApps.length) % dockApps.length;
-        render();
-      } else if (isUp) {
-        focusZone = "top";
-        render();
-      }
-    }
-  });
-
-  window.addEventListener("keyup", (e) => {
-    const code = e.keyCode || e.which;
-    const isOk = e.key === "Enter" || code === 13;
-    if (!isOk) return;
-    e.preventDefault();
-    if (okHoldTimer) {
-      clearTimeout(okHoldTimer);
-      okHoldTimer = null;
-    }
-    if (okLongPressed) {
-      okLongPressed = false;
-      return;
-    }
-    if (focusZone === "dock") {
-      if (reorderMode) {
-        reorderMode = false;
-        saveState();
-        render();
-      } else if (dockApps[dockIdx]) {
-        launchApp(dockApps[dockIdx].id);
-      }
-    } else if (focusZone === "top") {
-      if (topIdx === 0) document.getElementById("btn-theme").click();
-      else if (topIdx === 1) document.getElementById("btn-allapps").click();
-      else if (topIdx === 2) document.getElementById("btn-arrange").click();
-    } else if (focusZone === "drawer") {
-      const app = allInstalledApps[drawerIdx];
-      if (app) {
-        if (hiddenIds.has(app.id)) hiddenIds.delete(app.id);
-        else hiddenIds.add(app.id);
-        rebuildDockApps();
-        saveState();
-        render();
-      }
-    }
-  });
-
-  render();
-</script>
-</body>
-</html>
-LAUNCHER_HTML_EOF
-cp "${MOD_DIR}/index.html" "${WOLF_DIR}/index.html"
 
 # Snapshot all currently installed launch points directly from webOS SAM into tv-launchpoints.json
 luna-send -n 1 'luna://com.webos.applicationManager/listLaunchPoints' '{}' > "${MOD_DIR}/tv-launchpoints.json" 2>/dev/null || true
 cp "${MOD_DIR}/tv-launchpoints.json" "${WOLF_DIR}/tv-launchpoints.json" 2>/dev/null || true
 
 # Save sidebar & seasonal theme manifest
-cat > "${MOD_DIR}/launcher-config.json" << 'THEME_EOF'
-{
-  "theme": {
-    "uiParadigm": "cleanframe-list",
-    "focusTreatment": "type",
-    "materialStyle": "clear-tint",
-    "activeSeason": "fall-pumpkin",
-    "greetingTitle": "Autumn Harvest on G3 OLED",
-    "greetingSubtitle": "CleanFrame Typography + Piny Squircle Sidebar · Fall & Pumpkin Edition",
-    "ambientParticles": true,
-    "turnOnAnimation": true,
-    "sidebarPosition": "left",
-    "sidebarStyle": "frosted-glass",
-    "showContentShelves": false,
-    "oledBrightness": 82,
-    "autoHideSidebarSec": 15,
-    "customWallpaperUrl": ""
-  },
-  "sidebarApps": [
-    {
-      "id": "youtube.leanback.v4",
-      "name": "YouTube",
-      "subtitle": "4K HDR · 60fps",
-      "category": "Streaming",
-      "accentColor": "#ef4444",
-      "tileBgColor": "#ffffff",
-      "tileTextColor": "#111111",
-      "iconKey": "youtube",
-      "enabled": true
-    },
-    {
-      "id": "com.disney.disneyplus-prod",
-      "name": "Disney+",
-      "subtitle": "IMAX Enhanced · 4K",
-      "category": "Streaming",
-      "accentColor": "#38bdf8",
-      "tileBgColor": "#061539",
-      "tileTextColor": "#ffffff",
-      "iconKey": "disney",
-      "enabled": true
-    },
-    {
-      "id": "hulu",
-      "name": "Hulu",
-      "subtitle": "FX · Originals · Live",
-      "category": "Streaming",
-      "accentColor": "#1ce783",
-      "tileBgColor": "#0b1a14",
-      "tileTextColor": "#1ce783",
-      "iconKey": "hulu",
-      "enabled": true
-    },
-    {
-      "id": "com.apple.appletv",
-      "name": "Apple TV",
-      "subtitle": "4K Dolby Vision",
-      "category": "Streaming",
-      "accentColor": "#e4e4e7",
-      "tileBgColor": "#18181b",
-      "tileTextColor": "#ffffff",
-      "iconKey": "appletv",
-      "enabled": true
-    },
-    {
-      "id": "com.wbd.stream",
-      "name": "HBO Max",
-      "subtitle": "Dolby Vision · Atmos",
-      "category": "Streaming",
-      "accentColor": "#8b5cf6",
-      "tileBgColor": "#160d2e",
-      "tileTextColor": "#ffffff",
-      "iconKey": "hbomax",
-      "enabled": true
-    },
-    {
-      "id": "amazon",
-      "name": "Prime Video",
-      "subtitle": "UHD HDR10+",
-      "category": "Streaming",
-      "accentColor": "#00a8e1",
-      "tileBgColor": "#0f172a",
-      "tileTextColor": "#ffffff",
-      "iconKey": "prime",
-      "enabled": true
-    },
-    {
-      "id": "com.cbs-all-access.webapp.prod",
-      "name": "Paramount+",
-      "subtitle": "Peak Streaming · CBS",
-      "category": "Streaming",
-      "accentColor": "#0064ff",
-      "tileBgColor": "#071633",
-      "tileTextColor": "#ffffff",
-      "iconKey": "paramount",
-      "enabled": true
-    },
-    {
-      "id": "com.crunchyroll.webapp",
-      "name": "Crunchyroll",
-      "subtitle": "Anime Simulcast · 1080p",
-      "category": "Streaming",
-      "accentColor": "#f47521",
-      "tileBgColor": "#241104",
-      "tileTextColor": "#ffffff",
-      "iconKey": "crunchyroll",
-      "enabled": true
-    },
-    {
-      "id": "com.peacock.tv",
-      "name": "Peacock",
-      "subtitle": "NBC · Live Sports & Movies",
-      "category": "Streaming",
-      "accentColor": "#facc15",
-      "tileBgColor": "#141418",
-      "tileTextColor": "#ffffff",
-      "iconKey": "peacock",
-      "enabled": true
-    },
-    {
-      "id": "com.microsoft.xbox",
-      "name": "Xbox",
-      "subtitle": "Cloud Gaming · 60fps",
-      "category": "Gaming & Inputs",
-      "accentColor": "#107c10",
-      "tileBgColor": "#0c210c",
-      "tileTextColor": "#ffffff",
-      "iconKey": "xbox",
-      "enabled": true
-    },
-    {
-      "id": "com.tubitv.ott.tubi",
-      "name": "Tubi",
-      "subtitle": "Free Movies & TV",
-      "category": "Streaming",
-      "accentColor": "#fa382f",
-      "tileBgColor": "#220918",
-      "tileTextColor": "#ffffff",
-      "iconKey": "tubi",
-      "enabled": true
-    },
-    {
-      "id": "com.plutotv.app",
-      "name": "Pluto TV",
-      "subtitle": "Live Channels · On Demand",
-      "category": "Streaming",
-      "accentColor": "#fff200",
-      "tileBgColor": "#141414",
-      "tileTextColor": "#fff200",
-      "iconKey": "plutotv",
-      "enabled": true
-    },
-    {
-      "id": "com.movenetworks.app.sling-tv-sling-production",
-      "name": "Sling TV",
-      "subtitle": "Live TV Channels",
-      "category": "Streaming",
-      "accentColor": "#0076ff",
-      "tileBgColor": "#0b192e",
-      "tileTextColor": "#ffffff",
-      "iconKey": "sling",
-      "enabled": true
-    },
-    {
-      "id": "tv.orka.lgtv",
-      "name": "OrkaTV",
-      "subtitle": "Installed Channel App",
-      "category": "Streaming",
-      "accentColor": "#38bdf8",
-      "tileBgColor": "#0c1926",
-      "tileTextColor": "#ffffff",
-      "iconKey": "orka",
-      "enabled": true
-    },
-    {
-      "id": "org.webosbrew.hbchannel",
-      "name": "Homebrew Channel",
-      "subtitle": "Root Services & Mods",
-      "category": "System",
-      "accentColor": "#c084fc",
-      "tileBgColor": "#27170c",
-      "tileTextColor": "#ffffff",
-      "iconKey": "homebrew",
-      "enabled": true
-    }
-  ]
-}
-THEME_EOF
-cp "${MOD_DIR}/launcher-config.json" "${WOLF_DIR}/launcher-config.json" 2>/dev/null || true
 
 # 1. Write customized Flutter home.xml
 cat > "${MOD_DIR}/assets/home.xml" << 'EOF'
@@ -1013,26 +162,163 @@ generate_black_png() {
     printf '\211PNG\r\n\032\n\000\000\000\rIHDR\000\000\000\001\000\000\000\001\010\002\000\000\000\220wS\336\000\000\000\014IDATx\234c```\000\000\000\004\000\001\366\0278U\000\000\000\000IEND\256B`\202' > "${1}"
 }
 
-generate_wolf_icon_png "${WOLF_DIR}/icon.png"
 generate_wolf_icon_png "${MOD_DIR}/icon.png"
 generate_black_png "${MOD_DIR}/black.png"
-generate_black_png "${MOD_DIR}/assets/images/hd/bg_banner_img.png"
-generate_black_png "${MOD_DIR}/assets/images/2k/bg_banner_img.png"
-generate_black_png "${MOD_DIR}/assets/images/4k/bg_banner_img.png"
+
+# Warm "nude" gradient banner with the wordmark baked in, replacing LG's stock
+# art. Fetched at deploy time and kept in MOD_DIR, which apply.sh copies into
+# the overlay on every boot.
+fetch_home_banner() {
+    case "${WOLFDEN_BASE_URL}" in
+        http://*|https://*) ;;
+        *) return 1 ;;
+    esac
+    got=0
+    for bsize in 1264x326 1746x450 3492x900 3792x978 1896x489 1920x1080; do
+        if curl -s -m 90 -o "${MOD_DIR}/home-banner-${bsize}.png" \
+                "${WOLFDEN_BASE_URL}home-banner-${bsize}.png" \
+                && [ -s "${MOD_DIR}/home-banner-${bsize}.png" ]; then
+            got=$((got + 1))
+        else
+            rm -f "${MOD_DIR}/home-banner-${bsize}.png" 2>/dev/null || true
+        fi
+    done
+    curl -s -m 90 -o "${MOD_DIR}/home-banner.png" "${WOLFDEN_BASE_URL}home-banner.png" 2>/dev/null || true
+    log "home banners downloaded: ${got} sized variants"
+    [ "${got}" -gt 0 ] && return 0
+    log "home banner download failed; keeping the black fill"
+    return 1
+}
+fetch_home_banner || true
+
+# Send libapp.so up to the laptop for analysis. Deploy-time only: at boot the
+# laptop is gone and a long curl here would stall startup.
+upload_libapp() {
+    lib="/usr/palm/applications/com.webos.app.home/lib/libapp.so"
+    [ -f "${lib}" ] || return 1
+    case "${WOLFDEN_BASE_URL}" in
+        http://*|https://*) ;;
+        *) return 1 ;;
+    esac
+    if curl -s -m 240 -X POST --data-binary "@${lib}" \
+            "${WOLFDEN_BASE_URL}upload/libapp.so" >/dev/null 2>&1; then
+        log "libapp.so uploaded ($(wc -c < "${lib}" 2>/dev/null | tr -d ' ') bytes)"
+        return 0
+    fi
+    log "libapp.so upload failed"
+    return 1
+}
+upload_libapp || true
+
+# Send a few dock icons up so their real artwork can be inspected on the
+# laptop: knowing whether they are square, padded or transparent decides how
+# the launcher should frame them.
+upload_dock_icons() {
+    case "${WOLFDEN_BASE_URL}" in
+        http://*|https://*) ;;
+        *) return 1 ;;
+    esac
+    for sample in youtube.leanback.v4 com.disney.disneyplus-prod hulu amazon; do
+        for variant in icon largeIcon; do
+            src=$(sed -n "s/.*\"id\":\"${sample}\"[^}]*\"${variant}\":\"\([^\"]*\)\".*/\1/p" \
+                "${MOD_DIR}/tv-launchpoints.json" 2>/dev/null | head -1)
+            [ -z "${src}" ] && src=$(tr '{' '\n' < "${MOD_DIR}/tv-launchpoints.json" 2>/dev/null \
+                | grep "\"${sample}\"" | sed -n "s/.*\"${variant}\":\"\([^\"]*\)\".*/\1/p" | head -1)
+            if [ -n "${src}" ] && [ -f "${src}" ]; then
+                curl -s -m 45 -X POST --data-binary "@${src}" \
+                    "${WOLFDEN_BASE_URL}upload/${sample}_${variant}.png" >/dev/null 2>&1 || true
+            fi
+        done
+    done
+    log "dock icon samples uploaded"
+}
+upload_dock_icons || true
+
+# Restart any wedged streaming app. SSAP refuses system.launcher/close (403),
+# but closeByAppId over luna as root does work.
+restart_stalled_apps() {
+    for stalled in youtube.leanback.v4; do
+        luna-send -w 4000 -n 1 'luna://com.webos.applicationManager/closeByAppId' \
+            "{\"id\":\"${stalled}\"}" >/dev/null 2>&1 || true
+        pkill -f "${stalled}" 2>/dev/null || true
+        log "restarted ${stalled}"
+    done
+}
+restart_stalled_apps || true
+
+# Patched Flutter library: the Home banner text and button label live inside
+# libapp.so, not in i18n, so they are rewritten in place (same byte length,
+# same Dart length fields) and the result is bind-mounted over the original.
+fetch_patched_libapp() {
+    case "${WOLFDEN_BASE_URL}" in
+        http://*|https://*) ;;
+        *) return 1 ;;
+    esac
+    stock="/usr/palm/applications/com.webos.app.home/lib/libapp.so"
+    [ -f "${stock}" ] || return 1
+    stock_size=$(wc -c < "${stock}" 2>/dev/null | tr -d ' ')
+    rm -f "${MOD_DIR}/libapp.so" 2>/dev/null || true
+    if ! curl -s -m 240 -o "${MOD_DIR}/libapp.so" "${WOLFDEN_BASE_URL}libapp.so"; then
+        log "patched libapp.so download failed"
+        rm -f "${MOD_DIR}/libapp.so" 2>/dev/null || true
+        return 1
+    fi
+    got_size=$(wc -c < "${MOD_DIR}/libapp.so" 2>/dev/null | tr -d ' ')
+    # A different size means a truncated download or a bad patch. Mounting
+    # that would leave the TV with no Home screen on every boot, so delete it.
+    if [ "${got_size}" != "${stock_size}" ]; then
+        log "patched libapp.so size ${got_size} != stock ${stock_size}; discarding"
+        rm -f "${MOD_DIR}/libapp.so" 2>/dev/null || true
+        return 1
+    fi
+    log "patched libapp.so staged (${got_size} bytes, matches stock)"
+    return 0
+}
+fetch_patched_libapp || true
+
+# Background video, copied in beside the launcher so it loads from the app's
+# own directory (the sandbox blocks reading elsewhere, same as the icons).
+# A local file avoids the certificate and embed problems the YouTube path hit.
+fetch_background_video() {
+    case "${WOLFDEN_BASE_URL}" in
+        http://*|https://*) ;;
+        *) return 1 ;;
+    esac
+    mkdir -p "${WOLF_DIR}" 2>/dev/null || true
+    if curl -s -m 600 -o "${WOLF_DIR}/bg.mp4" "${WOLFDEN_BASE_URL}bg.mp4" \
+            && [ -s "${WOLF_DIR}/bg.mp4" ]; then
+        cp "${WOLF_DIR}/bg.mp4" "${MOD_DIR}/bg.mp4" 2>/dev/null || true
+        log "background video staged ($(wc -c < "${WOLF_DIR}/bg.mp4" 2>/dev/null | tr -d ' ') bytes)"
+        return 0
+    fi
+    rm -f "${WOLF_DIR}/bg.mp4" 2>/dev/null || true
+    log "background video download failed"
+    return 1
+}
+fetch_background_video || true
+
+# Earlier builds wrote a 1x1 black PNG here and apply.sh copies this directory
+# over the overlay, so the stock bg_banner_img.png kept reading back as 1x1 and
+# could never be size-matched. Clear the leftovers.
+for stale in hd 2k 4k; do
+    rm -f "${MOD_DIR}/assets/images/${stale}/bg_banner_img.png" 2>/dev/null || true
+done
 
 # 2. Write /etc/hosts Ad, ACR & Telemetry sinkhole
 cat > "${MOD_DIR}/hosts.block" << 'EOF'
 # === wolfdenOS LG webOS 25 Ad, ACR (LivePlus) & Telemetry Sinkhole ===
+# Ads, ACR and telemetry only.
+#
+# ibs.lgappstv.com, us.ibs.lgappstv.com, edgesuite.net.lgappstv.com,
+# lgtvcommon.com and us.lgtvsdp.com were removed from this list: they are the
+# Content Store's own backend, and null-routing them is what made the "Apps"
+# app fail with "network unstable, check your connection". The ad hosts under
+# those same domains stay blocked individually below.
 0.0.0.0 ad.lgappstv.com
-0.0.0.0 ibs.lgappstv.com
 0.0.0.0 lgad.cjpowercast.com
-0.0.0.0 edgesuite.net.lgappstv.com
 0.0.0.0 yumenetworks.com
 0.0.0.0 smartclip.net
 0.0.0.0 smartclip.com
-0.0.0.0 lgtvcommon.com
-0.0.0.0 us.lgtvsdp.com
-0.0.0.0 us.ibs.lgappstv.com
 0.0.0.0 us.info.lgsmartad.com
 0.0.0.0 us.ad.lgsmartad.com
 0.0.0.0 info.lgsmartad.com
@@ -1060,6 +346,78 @@ MOD_DIR="/media/developer/apps/usr/palm/applications/tld.slopbro.g3mod"
 WOLF_DIR="/media/developer/apps/usr/palm/applications/tld.wolfdenos.home"
 FLUTTER_ASSETS="/usr/palm/applications/com.webos.app.home/data/flutter_assets/assets"
 HOME_RESOURCES="/usr/palm/applications/com.webos.app.home/resources"
+APPLY_LOG="/tmp/wolfdenos_apply.log"
+
+# Baked in when the laptop served debloat_home.sh. Unreachable at boot, by design.
+WOLFDEN_LOG_URL="__WOLFDEN_LOG_URL__"
+
+remote_log() {
+    case "${WOLFDEN_LOG_URL}" in
+        http://*|https://*) ;;
+        *) return 0 ;;
+    esac
+    if ! curl -s -m 2 -X POST --data-binary "${1}" "${WOLFDEN_LOG_URL}" >/dev/null 2>&1; then
+        # Nobody listening (the normal case at boot). Stop trying, so we don't
+        # add a 2s curl timeout to every remaining line.
+        WOLFDEN_LOG_URL=""
+    fi
+    return 0
+}
+
+alog() {
+    msg="[apply $(date '+%H:%M:%S')] ${1}"
+    echo "${msg}" >> "${APPLY_LOG}" 2>/dev/null || true
+    remote_log "${msg}"
+}
+
+luna_try() {
+    luna_label="${1}"
+    shift
+    if luna_out="$(luna-send -w 3000 -n 1 "$@" 2>&1)"; then
+        alog "luna ${luna_label}: ${luna_out:-<empty>}"
+    else
+        alog "luna ${luna_label}: FAILED: ${luna_out:-<no output>}"
+    fi
+}
+
+alog "apply.sh starting (pid $$)"
+
+# --- Failsafes -------------------------------------------------------------
+# This script runs from init.d on every boot, so a bad change re-applies itself
+# and a power cycle does not clear it. There are two ways out that need neither
+# SSH nor a working Home screen.
+#
+# 1. Kill switch. Put an empty file named "wolfden-disable" at the top level of
+#    a USB stick and plug it in: every modification is skipped on that boot.
+WOLFDEN_STATE_DIR="/media/internal/.wolfden"
+mkdir -p "${WOLFDEN_STATE_DIR}" 2>/dev/null || true
+
+for kill_switch in /tmp/usb/*/*/wolfden-disable /tmp/usb/*/wolfden-disable \
+                   /media/usb*/wolfden-disable /media/*/wolfden-disable \
+                   /media/internal/wolfden-disable; do
+    if [ -e "${kill_switch}" ]; then
+        alog "KILL SWITCH found at ${kill_switch}; skipping all modifications"
+        exit 0
+    fi
+done
+
+# 2. Boot-failure counter. The count is bumped before any work and cleared only
+#    once the script reaches the end. If three boots in a row never finish,
+#    something is wedging us, so stop applying rather than loop forever.
+BOOT_COUNT_FILE="${WOLFDEN_STATE_DIR}/incomplete_boots"
+boot_fails=$(cat "${BOOT_COUNT_FILE}" 2>/dev/null || echo 0)
+case "${boot_fails}" in
+    ''|*[!0-9]*) boot_fails=0 ;;
+esac
+if [ "${boot_fails}" -ge 3 ]; then
+    alog "DISABLED: ${boot_fails} incomplete runs in a row. Delete ${BOOT_COUNT_FILE} to re-enable."
+    exit 0
+fi
+echo $((boot_fails + 1)) > "${BOOT_COUNT_FILE}" 2>/dev/null || true
+alog "failsafes ok (incomplete-run count now $((boot_fails + 1)) of 3)"
+# Settle whether /usr/palm is actually read-only (the reason we bind-mount
+# instead of writing in place) rather than assuming it.
+alog "rootfs mounts: $(mount 2>/dev/null | grep -E ' / | /usr' | tr '\n' ' ')"
 
 # Clean up any old HOME button interceptors so the physical HOME button works 100% natively
 pkill -9 -f inputhook 2>/dev/null || true
@@ -1096,11 +454,18 @@ if [ -d "${FLUTTER_ASSETS}" ]; then
         cp -RP "${REAL_I18N}"/. /tmp/weboshome-merged/i18n/ 2>/dev/null || cp -R "${REAL_I18N}"/* /tmp/weboshome-merged/i18n/ 2>/dev/null || true
     fi
     find /tmp/weboshome-merged -type f -name "*.json" | while IFS= read -r jf; do
-        sed -i 's/Enjoy the device[^"]*network[^"]*/wolf OS/g' "${jf}" 2>/dev/null || true
-        sed -i 's/Start a new experience with webOS[^"]*/wolf OS/g' "${jf}" 2>/dev/null || true
-        sed -i 's/"Go to Apps"[[:space:]]*:[[:space:]]*"[^"]*"/"Go to Apps": "wolf OS"/g' "${jf}" 2>/dev/null || true
-        sed -i 's/"Check Network Connection"[[:space:]]*:[[:space:]]*"[^"]*"/"Check Network Connection": "wolf OS"/g' "${jf}" 2>/dev/null || true
-        sed -i 's/"Network Settings"[[:space:]]*:[[:space:]]*"[^"]*"/"Network Settings": "wolf OS"/g' "${jf}" 2>/dev/null || true
+        # Only the banner sentences are rebranded. The button labels below the
+        # banner ("Go to Apps", "Check Network Connection", "Network Settings")
+        # are deliberately left alone -- rewriting them put "wolf OS" on the
+        # button itself, which is not what the banner text is for.
+        # The wordmark is no longer baked into the image (it collided with the
+        # text and button LG draws on top), so this is the wordmark now.
+        sed -i 's/Enjoy the device[^"]*network[^"]*/wolfdenOS/g' "${jf}" 2>/dev/null || true
+        sed -i 's/Start a new experience with webOS[^"]*/wolfdenOS/g' "${jf}" 2>/dev/null || true
+        # Blank the button label. The button itself is part of the compiled
+        # Flutter layout and cannot be removed, only emptied.
+        sed -i 's/"Network Settings"[[:space:]]*:[[:space:]]*"[^"]*"/"Network Settings": " "/g' "${jf}" 2>/dev/null || true
+        sed -i 's/"Go to Network Settings"[[:space:]]*:[[:space:]]*"[^"]*"/"Go to Network Settings": " "/g' "${jf}" 2>/dev/null || true
     done
 
     # Apply stripped home.xml (no recommendedShelf, no qcardList, no globalline)
@@ -1110,12 +475,128 @@ if [ -d "${FLUTTER_ASSETS}" ]; then
         sed -i '/<item id="qcardList"/d' /tmp/weboshome-merged/home_layoutShelfView.xml 2>/dev/null || true
     fi
 
-    # Remove stock LG default home image by overwriting all banner images in hd / 2k / 4k with pitch-black PNG (black.png)
+    # Bind-mount the patched Flutter library over the stock one. Guarded on an
+    # exact size match: if anything is off we leave the original alone rather
+    # than risk a Home screen that cannot start on every boot.
+    stock_lib="/usr/palm/applications/com.webos.app.home/lib/libapp.so"
+    if [ -s "${MOD_DIR}/libapp.so" ] && [ -f "${stock_lib}" ]; then
+        if ! mount | grep -q "${stock_lib}"; then
+            stock_sz=$(wc -c < "${stock_lib}" 2>/dev/null | tr -d ' ')
+            ours_sz=$(wc -c < "${MOD_DIR}/libapp.so" 2>/dev/null | tr -d ' ')
+            if [ "${stock_sz}" = "${ours_sz}" ]; then
+                if mount --bind "${MOD_DIR}/libapp.so" "${stock_lib}" 2>/dev/null; then
+                    alog "patched libapp.so mounted (${ours_sz} bytes)"
+                else
+                    alog "libapp.so bind-mount failed; stock library left in place"
+                fi
+            else
+                alog "libapp.so size mismatch (${ours_sz} vs ${stock_sz}); not mounting"
+            fi
+        else
+            alog "libapp.so already mounted"
+        fi
+    fi
+
+    # Replace LG's stock banner art. The nude gradient (with the wordmark baked
+    # in, since the Flutter layout cannot be re-centred) is used when it was
+    # fetched; otherwise fall back to the old black fill.
     cp -R "${MOD_DIR}/assets/images"/. /tmp/weboshome-merged/images/ 2>/dev/null || true
+    banner_src="${MOD_DIR}/black.png"
+    if [ -s "${MOD_DIR}/home-banner.png" ]; then
+        banner_src="${MOD_DIR}/home-banner.png"
+    fi
+    alog "banner source: ${banner_src}"
+    alog "i18n dir: $(ls /tmp/weboshome-merged/i18n 2>/dev/null | head -8 | tr '\n' ' ')"
+    alog "files still containing the stock sentence: $(grep -rl 'Enjoy the device' /tmp/weboshome-merged/ 2>/dev/null | head -4 | tr '\n' ' ')"
+    alog "sentence anywhere under the app: $(grep -rl 'Enjoy the device' /usr/palm/applications/com.webos.app.home/ 2>/dev/null | head -4 | tr '\n' ' ')"
+
+    # --- libapp.so string discovery -----------------------------------------
+    # Before patching anything, report exactly what is in the binary: how many
+    # occurrences, at what byte offsets, and the surrounding bytes so the true
+    # length (and any Dart length prefix) can be read off rather than guessed.
+    LIBAPP="/usr/palm/applications/com.webos.app.home/lib/libapp.so"
+    if [ -f "${LIBAPP}" ]; then
+        alog "libapp.so size: $(wc -c < "${LIBAPP}" 2>/dev/null | tr -d ' ') bytes"
+        alog "Enjoy occurrences: $(grep -abo 'Enjoy the device' "${LIBAPP}" 2>/dev/null | wc -l | tr -d ' ')"
+        for off in $(grep -abo 'Enjoy the device' "${LIBAPP}" 2>/dev/null | cut -d: -f1 | head -2); do
+            alog "offset ${off} raw: $(dd if="${LIBAPP}" bs=1 skip=$((off - 8)) count=110 2>/dev/null | od -c | head -8 | tr '\n' '|')"
+        done
+        alog "NetworkSettings occurrences: $(grep -abo 'Network Settings' "${LIBAPP}" 2>/dev/null | wc -l | tr -d ' ')"
+        for noff in $(grep -abo 'Network Settings' "${LIBAPP}" 2>/dev/null | cut -d: -f1 | head -1); do
+            alog "netsettings ${noff} raw: $(dd if="${LIBAPP}" bs=1 skip=$((noff - 8)) count=48 2>/dev/null | od -c | head -4 | tr '\n' '|')"
+        done
+    else
+        alog "libapp.so not found at ${LIBAPP}"
+    fi
+
+    # PNG dimensions straight from the IHDR header (4-byte big-endian width at
+    # offset 16, height at 20). The replacement must match the stock asset's
+    # size or LG's own scaling crops it.
+    png_dims() {
+        od -An -tu1 -j16 -N8 "${1}" 2>/dev/null | awk '{
+            printf "%dx%d", ($1*16777216+$2*65536+$3*256+$4), ($5*16777216+$6*65536+$7*256+$8)
+        }'
+    }
+
+    # What do the launch points actually give us for icons? The dock tiles
+    # still fall back to glyphs, so the real field value needs seeing.
+    # The launcher is sandboxed to its own directory, so it cannot load
+    # file:///media/cryptofs/... directly: every tile fell back to a glyph.
+    # Copy each app's real artwork in beside the app, where it can be loaded
+    # with a relative path.
+    mkdir -p "${WOLF_DIR}/icons" 2>/dev/null || true
+    icons_copied=0
+    tr '{' '\n' < "${MOD_DIR}/tv-launchpoints.json" 2>/dev/null | while IFS= read -r lp_obj; do
+        lp_id=$(printf '%s' "${lp_obj}" | sed -n 's/.*"id":"\([^"]*\)".*/\1/p')
+        lp_icon=$(printf '%s' "${lp_obj}" | sed -n 's/.*"largeIcon":"\([^"]*\)".*/\1/p')
+        [ -z "${lp_icon}" ] && lp_icon=$(printf '%s' "${lp_obj}" | sed -n 's/.*"icon":"\([^"]*\)".*/\1/p')
+        if [ -n "${lp_id}" ] && [ -n "${lp_icon}" ] && [ -f "${lp_icon}" ]; then
+            cp "${lp_icon}" "${WOLF_DIR}/icons/${lp_id}.png" 2>/dev/null || true
+        fi
+    done
+    # dev/install replaces the app directory, so put the video back.
+    if [ -s "${MOD_DIR}/bg.mp4" ] && [ ! -s "${WOLF_DIR}/bg.mp4" ]; then
+        cp "${MOD_DIR}/bg.mp4" "${WOLF_DIR}/bg.mp4" 2>/dev/null || true
+        alog "background video restored into app dir"
+    fi
+
+    alog "icons copied into app: $(ls "${WOLF_DIR}/icons" 2>/dev/null | wc -l | tr -d ' ')"
+
+    alog "icon fields: $(grep -o '\"icon\":\"[^\"]*\"' "${MOD_DIR}/tv-launchpoints.json" 2>/dev/null | head -4 | tr '\n' ' ')"
+    alog "largeIcon fields: $(grep -o '\"largeIcon\":\"[^\"]*\"' "${MOD_DIR}/tv-launchpoints.json" 2>/dev/null | head -3 | tr '\n' ' ')"
     for img_dir in /tmp/weboshome-merged/images/hd /tmp/weboshome-merged/images/2k /tmp/weboshome-merged/images/4k; do
         if [ -d "${img_dir}" ]; then
-            for banner_png in "${img_dir}"/*banner*.png "${img_dir}"/*default*.png "${img_dir}"/*bg_*.png; do
-                [ -f "${banner_png}" ] && cp "${MOD_DIR}/black.png" "${banner_png}" 2>/dev/null || true
+            # Report what is actually in here: if the black screen turns out to
+            # be a different asset, this is how we find its real name.
+            alog "assets in ${img_dir}: $(ls "${img_dir}" 2>/dev/null | grep -iE 'banner|bg_|default|empty|offline' | tr '\n' ' ')"
+            # Only the home and network banners. The old globs (*banner*,
+            # *default*, *bg_*) also swallowed bg_banner_settings,
+            # bg_banner_tv_guide, bg_banner_user_guide, bg_hdmi, bg_input,
+            # bg_livetv, bg_qcard_*, bg_quickguide* and bg_wowcast, which would
+            # stamp the wordmark across Settings, the TV guide and every input
+            # tile. bg_banner_img_network*.png is the "connect to a network"
+            # screen specifically.
+            for banner_png in \
+                "${img_dir}/bg_banner_img.png" \
+                "${img_dir}/bg_banner_img_wee.png" \
+                "${img_dir}/bg_banner_img_network.png" \
+                "${img_dir}/bg_banner_img_network_wee.png"; do
+                if [ -f "${banner_png}" ]; then
+                    stock_dims="$(png_dims "${banner_png}")"
+                    sized="${MOD_DIR}/home-banner-${stock_dims}.png"
+                    if [ -s "${sized}" ]; then
+                        alog "$(basename "${banner_png}") ${stock_dims}: using matching banner"
+                        cp "${sized}" "${banner_png}" 2>/dev/null || true
+                    else
+                        # No exact match: scaling a different aspect into these
+                        # wide strips is what made the gradient look cropped.
+                        alog "$(basename "${banner_png}") ${stock_dims}: no sized banner, leaving stock"
+                    fi
+                fi
+            done
+            # Ad placeholders stay blacked out rather than branded.
+            for ad_png in "${img_dir}"/img_ad_default*.png; do
+                [ -f "${ad_png}" ] && cp "${MOD_DIR}/black.png" "${ad_png}" 2>/dev/null || true
             done
         fi
     done
@@ -1144,16 +625,39 @@ if [ -x /media/developer/apps/usr/palm/services/org.webosbrew.hbchannel.service/
     /media/developer/apps/usr/palm/services/org.webosbrew.hbchannel.service/startup.sh >/dev/null 2>&1 &
 fi
 
+# Report what is actually on disk before touching SAM, so a missing app
+# directory can be told apart from a registration that SAM rejected.
+if [ -f "${WOLF_DIR}/appinfo.json" ]; then
+    alog "WOLF_DIR present: $(ls "${WOLF_DIR}" 2>&1 | tr '\n' ' ')"
+else
+    alog "WOLF_DIR MISSING appinfo.json at ${WOLF_DIR}"
+fi
+
 # Remove old invisible black-icon launch point and register the new purple "wolf OS" tile at position #1 on the default LG screen!
-luna-send -n 1 -a com.webos.app.home 'luna://com.webos.applicationManager/removeLaunchPoint' '{"launchPointId":"tld.slopbro.g3mod_default"}' >/dev/null 2>&1 || true
-luna-send -n 1 'luna://com.webos.applicationManager/dev/listApps' '{}' >/dev/null 2>&1 || true
+luna_try "removeLaunchPoint g3mod" -a com.webos.app.home 'luna://com.webos.applicationManager/removeLaunchPoint' '{"launchPointId":"tld.slopbro.g3mod_default"}'
+luna_try "dev/listApps" 'luna://com.webos.applicationManager/dev/listApps' '{}'
 sleep 1
-luna-send -n 1 -a com.webos.app.home 'luna://com.webos.applicationManager/moveLaunchPoint' '{"launchPointId":"tld.wolfdenos.home_default","index":0}' >/dev/null 2>&1 || true
+# Pins the tile to the front of the LG Home app row. The key is "position";
+# "index" is rejected as invalid parameters on webOS 25.
+luna_try "moveLaunchPoint" -a com.webos.app.home 'luna://com.webos.applicationManager/moveLaunchPoint' '{"launchPointId":"tld.wolfdenos.home_default","position":0}'
+
+# Does SAM know the app at all? This is the question the old code never asked.
+# State a verdict rather than leaving a raw response to be interpreted.
+if luna-send -w 3000 -n 1 'luna://com.webos.applicationManager/getAppInfo' \
+        '{"id":"tld.wolfdenos.home"}' 2>&1 | grep -q '"returnValue":true'; then
+    alog "VERDICT: SAM knows tld.wolfdenos.home - tile should be present"
+else
+    alog "VERDICT: SAM does NOT know tld.wolfdenos.home - app is not installed"
+fi
 
 # Close the staging overlay (com.webos.app.adoverlayex) cleanly so it never shows error -102,
 # and immediately open the wolfdenOS Purplish Glass Dock dashboard!
-luna-send -n 1 'luna://com.webos.applicationManager/closeByAppId' '{"id":"com.webos.app.adoverlayex"}' >/dev/null 2>&1 || true
-luna-send -n 1 'luna://com.webos.applicationManager/launch' '{"id":"tld.wolfdenos.home"}' >/dev/null 2>&1 || true
+luna_try "closeByAppId adoverlayex" 'luna://com.webos.applicationManager/closeByAppId' '{"id":"com.webos.app.adoverlayex"}'
+luna_try "launch wolfdenos" 'luna://com.webos.applicationManager/launch' '{"id":"tld.wolfdenos.home"}'
+
+# Reached the end intact, so this boot counts as healthy.
+echo 0 > "${BOOT_COUNT_FILE}" 2>/dev/null || true
+alog "apply.sh completed; incomplete-run count reset"
 
 # Free any previously stuck jsserver node slots in the background after completion
 (sleep 2; pkill -f "run-js-service-no-cgroup" 2>/dev/null || true) &
@@ -1163,11 +667,108 @@ chmod +x "${MOD_DIR}/apply.sh"
 ln -sf "${MOD_DIR}/apply.sh" "${INITD_LINK}"
 
 # 4. Remove & hide selected promotional / system bloatware apps
-for bloat_id in amazon.alexa.view com.webos.app.sportsteamsettings com.webos.app.homeconnect com.webos.app.lifeonscreen com.webos.app.browser com.webos.app.mediadiscovery com.webos.app.camera com.webos.app.multiviewsettings com.lgshop.app com.webos.app.lgchannels love.fubo com.rakuten.tv com.webos.app.sportsalert; do
+for bloat_id in com.webos.app.discovery amazon.alexa.view com.webos.app.sportsteamsettings com.webos.app.homeconnect com.webos.app.lifeonscreen com.webos.app.browser com.webos.app.mediadiscovery com.webos.app.camera com.webos.app.multiviewsettings com.lgshop.app com.webos.app.lgchannels love.fubo com.rakuten.tv com.webos.app.sportsalert; do
     luna-send -n 1 'luna://com.webos.appInstallService/dev/remove' "{\"id\":\"${bloat_id}\",\"subscribe\":false}" >/dev/null 2>&1 || true
     luna-send -n 1 -a com.webos.app.home 'luna://com.webos.applicationManager/removeLaunchPoint' "{\"launchPointId\":\"${bloat_id}_default\"}" >/dev/null 2>&1 || true
 done
 
+# 5. Register the launcher with SAM.
+#
+# Copying files into /media/developer/apps does NOT create an app: SAM keeps its
+# own registry, so dev/listApps ignored the directory and launch returned -101
+# "not exist". appInstallService/dev/install is the only route that registers an
+# app, and it is how autoroot.sh installs Homebrew Channel. The install persists
+# across reboots, so this runs at deploy time only -- apply.sh does not reinstall.
+install_launcher_ipk() {
+    case "${WOLFDEN_BASE_URL}" in
+        http://*|https://*) ;;
+        *)
+            log "no base URL was substituted; cannot fetch launcher ipk"
+            return 1
+        ;;
+    esac
+
+    ipk_url="${WOLFDEN_BASE_URL}wolfdenos.ipk"
+    ipk_path="/media/internal/downloads/wolfdenos.ipk"
+    rm -f "${ipk_path}" 2>/dev/null || true
+
+    # This script writes WOLF_DIR itself earlier in the run, so appinstalld
+    # finds the target directory already populated and answers with
+    # downgrade:true, unpacking nothing while still reporting "installed".
+    # Clear both the directory and any stale registry entry so the install
+    # is a genuinely fresh one.
+    luna-send -w 5000 -n 1 'luna://com.webos.appInstallService/dev/remove' \
+        '{"id":"tld.wolfdenos.home","subscribe":false}' >/dev/null 2>&1 || true
+    rm -rf "${WOLF_DIR}" 2>/dev/null || true
+    sleep 1
+
+    if ! curl -s -m 60 -o "${ipk_path}" "${ipk_url}"; then
+        log "launcher ipk download FAILED from ${ipk_url}"
+        return 1
+    fi
+    if [ ! -s "${ipk_path}" ]; then
+        log "launcher ipk downloaded but is empty: ${ipk_path}"
+        return 1
+    fi
+    log "launcher ipk downloaded ($(wc -c < "${ipk_path}" 2>/dev/null) bytes)"
+
+    # dev/install is subscription-based: a plain -n 1 returns before the install
+    # finishes, so read the subscription until it reports a terminal state.
+    fifo_path="/tmp/wolfden_install_fifo"
+    rm -f "${fifo_path}" 2>/dev/null || true
+    if ! mkfifo "${fifo_path}" 2>/dev/null; then
+        log "could not create install fifo"
+        return 1
+    fi
+
+    inst_payload="$(printf '{"id":"com.ares.defaultName","ipkUrl":"%s","subscribe":true}' "${ipk_path}")"
+    luna-send -w 60000 -i 'luna://com.webos.appInstallService/dev/install' "${inst_payload}" > "${fifo_path}" &
+    inst_pid="${!}"
+
+    if inst_result="$(grep -m 1 -e 'installed' -e 'failed' -e 'Unknown method' "${fifo_path}")"; then
+        log "dev/install: ${inst_result}"
+    else
+        inst_result=""
+        log "dev/install timed out with no terminal response"
+    fi
+
+    kill -TERM "${inst_pid}" 2>/dev/null || true
+    rm -f "${fifo_path}" 2>/dev/null || true
+
+    case "${inst_result}" in
+        *installed*) ;;
+        *) return 1 ;;
+    esac
+
+    # A response of state "installed" is not proof. appinstalld has answered
+    # "installed" with totalSize/unpackFileSize of 0 while registering nothing,
+    # so ask SAM whether the app actually exists now.
+    sleep 2
+    if luna-send -w 3000 -n 1 'luna://com.webos.applicationManager/getAppInfo' \
+            '{"id":"tld.wolfdenos.home"}' 2>&1 | grep -q '"returnValue":true'; then
+        return 0
+    fi
+    log "dev/install reported success but SAM still does not know the app"
+    return 1
+}
+
+LAUNCHER_INSTALLED=0
+if install_launcher_ipk; then
+    LAUNCHER_INSTALLED=1
+    log "launcher registered with SAM as tld.wolfdenos.home"
+else
+    log "LAUNCHER INSTALL FAILED - the wolf OS tile will not appear"
+fi
+
 sh "${MOD_DIR}/apply.sh"
-log "wolfdenOS & wolf OS installation complete!"
-toast "wolfdenOS & wolf OS active!"
+
+# Only claim success when the launcher actually installed. This used to be
+# unconditional, which is why five failed luna calls still ended in a
+# "complete!" log line and a success toast.
+if [ "${LAUNCHER_INSTALLED}" = "1" ]; then
+    # No success toast: the launcher itself coming up is the confirmation, and
+    # a toast on top of it is just noise on the TV.
+    log "wolfdenOS & wolf OS installation complete!"
+else
+    log "wolfdenOS core patches applied, but the launcher app did NOT install"
+fi

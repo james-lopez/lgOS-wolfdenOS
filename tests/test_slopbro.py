@@ -1,11 +1,14 @@
 import io
 import os
 import ssl
+import sys
 import tempfile
 import unittest
 from unittest.mock import Mock, call, patch
 
-import slopbro
+ROOT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, ROOT_DIR)
+import wolfdenOS as slopbro
 
 
 class CommandLineTests(unittest.TestCase):
@@ -22,6 +25,7 @@ class CommandLineTests(unittest.TestCase):
             "tv.local", debug=False, asset_source="auto",
             local_ip_override=None, webos_version_override=None,
             curl_insecure=False, fake_service_path=slopbro.DEFAULT_FAKE_SERVICE_PATH,
+            log_wait=slopbro.DEFAULT_LOG_WAIT,
         )
         self.runners["run_test_connection"].assert_not_called()
         self.runners["run_test_payload"].assert_not_called()
@@ -40,6 +44,7 @@ class CommandLineTests(unittest.TestCase):
                 "tv.local", debug=True, asset_source="dir",
                 local_ip_override="192.168.1.2", webos_version_override="6.5",
                 curl_insecure=True, fake_service_path=slopbro.DEFAULT_FAKE_SERVICE_PATH,
+                log_wait=slopbro.DEFAULT_LOG_WAIT,
             )
 
     def test_fake_service_path_options(self):

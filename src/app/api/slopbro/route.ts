@@ -1576,7 +1576,7 @@ export async function POST(request: Request) {
         [
           "tools/package_single_file.py",
           "--source",
-          "woldenOs.py",
+          "wolfdenOS.py",
           "--files",
           "index.html",
           "autoroot.sh",
@@ -1584,7 +1584,7 @@ export async function POST(request: Request) {
           "main.js",
           "debloat_home.sh",
           "--out",
-          "dist/woldenOs_packed.py",
+          "dist/wolfdenOS_packed.py",
         ],
         { cwd: process.cwd() },
         () => resolve()
@@ -1616,7 +1616,7 @@ export async function POST(request: Request) {
       }>((resolve) => {
         execFile(
           "python3",
-          ["woldenOs.py", ...args],
+          ["wolfdenOS.py", ...args],
           { cwd: process.cwd(), timeout: 12000 },
           (error, stdout, stderr) => {
             resolve({
@@ -1635,7 +1635,7 @@ export async function POST(request: Request) {
 
       return NextResponse.json({
         saved: true,
-        command: `python3 woldenOs.py ${args.join(" ")}`,
+        command: `python3 wolfdenOS.py ${args.join(" ")}`,
         runResult,
         generatedXml: generateHomeXml(config.homeLayout),
         generatedKeybinds: generateKeybindsJson(config.keybinds),

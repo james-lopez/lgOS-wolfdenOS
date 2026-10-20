@@ -18,12 +18,12 @@ export async function GET(request: Request) {
       });
     }
 
-    const packedPath = path.join(process.cwd(), "dist", "woldenOs_packed.py");
+    const packedPath = path.join(process.cwd(), "dist", "wolfdenOS_packed.py");
     const content = await fs.readFile(packedPath, "utf-8");
     return new NextResponse(content, {
       headers: {
         "Content-Type": "text/x-python; charset=utf-8",
-        "Content-Disposition": 'attachment; filename="woldenOs_packed.py"',
+        "Content-Disposition": 'attachment; filename="wolfdenOS_packed.py"',
       },
     });
   } catch (err: unknown) {

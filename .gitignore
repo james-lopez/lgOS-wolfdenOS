@@ -47,3 +47,25 @@ __pycache__/
 *.pyc
 /dist/
 
+
+# Real app artwork pulled off the TV for local preview only; apply.sh copies
+# these onto the device at deploy time and they are not part of the ipk.
+launcher/icons/
+uploads/
+
+# Background video: large binary, shipped to the TV at deploy time.
+wwwroot/bg.mp4
+launcher/bg.mp4
+
+# Generated artifacts, all reproducible from source in tools/:
+#   build_banner.py -> home-banner*.png
+#   build_launcher_ipk.py -> wolfdenos.ipk
+wwwroot/home-banner*.png
+wwwroot/wolfdenos.ipk
+
+# Patched copy of LG's proprietary Flutter library. Regenerate it with
+#   python3 tools/patch_libapp.py uploads/libapp.so -o wwwroot/libapp.so
+# after pulling the stock library off your own TV. Deliberately NOT committed:
+# it is a derivative of LG's copyrighted binary and redistributing it is a
+# different matter from patching it on a device you own.
+wwwroot/libapp.so

@@ -8,11 +8,23 @@ wolfdenOS — Custom LG webOS Deployment Stage
     <meta charset="UTF-8">
     <title>wolfdenOS</title>
     <style>
+        html, body {
+            height: 100%;
+        }
+
         body {
+            margin: 0;
             background: radial-gradient(circle at 50% 40%, #1e0b3a 0%, #070312 100%);
             color: #f3e8ff;
             font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
             padding: 48px 64px;
+            /* Centred as a single block: on a 1080p panel the old top-left
+               layout left everything stranded in the corner. */
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            text-align: center;
         }
 
         h1 {
@@ -29,22 +41,71 @@ wolfdenOS — Custom LG webOS Deployment Stage
             margin-bottom: 28px;
         }
 
-        #debug {
-            color: #a5b4fc;
-            font-family: monospace;
-            font-size: 18px;
+        /* Progress detail and debug chatter were small, low-contrast lines of
+           text on a TV nobody reads from the couch. Kept in the DOM so the
+           existing logging calls stay valid, but not shown. */
+        #debug,
+        #status {
+            display: none;
         }
 
+        /* Errors stay visible and readable: they are the one thing worth
+           showing on screen when something goes wrong. */
         #error {
             color: #fb7185;
-            font-family: monospace;
-            font-size: 20px;
+            font-size: 22px;
+            max-width: 1100px;
+            line-height: 1.45;
         }
 
-        #status {
-            color: #86efac;
-            font-size: 24px;
+
+        .stage-row {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 18px;
+            margin: 10px 0 18px 0;
+        }
+
+        /* Pure CSS so there is nothing to download while we are mid-deploy. */
+        #spinner {
+            width: 34px;
+            height: 34px;
+            flex: none;
+            border: 4px solid rgba(192, 132, 252, 0.28);
+            border-top-color: #c084fc;
+            border-radius: 50%;
+            animation: spin 0.9s linear infinite;
+        }
+
+        #spinner.done {
+            animation: none;
+            border-color: rgba(134, 239, 172, 0.35);
+            border-top-color: #86efac;
+        }
+
+        #spinner.failed {
+            animation: none;
+            border-color: rgba(251, 113, 133, 0.35);
+            border-top-color: #fb7185;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        #phase {
+            color: #ffffff;
+            font-size: 26px;
             font-weight: 500;
+        }
+
+        #hint {
+            color: #a78bfa;
+            font-size: 20px;
+            margin-top: 26px;
+            max-width: 1000px;
+            line-height: 1.5;
         }
     </style>
 </head>
@@ -52,9 +113,14 @@ wolfdenOS — Custom LG webOS Deployment Stage
 <body>
     <h1>wolfdenOS</h1>
     <p class="subtitle">wolf OS Core Patcher &amp; Purplish Glass Dock Launcher</p>
+    <div class="stage-row">
+        <div id="spinner"></div>
+        <div id="phase">Starting&hellip;</div>
+    </div>
     <p id="status"></p>
     <p id="debug"></p>
     <p id="error"></p>
+    <p id="hint"></p>
     <script>
         (function () {
             function getQueryParam(name) {
@@ -116,6 +182,20 @@ wolfdenOS — Custom LG webOS Deployment Stage
             var statusElem = document.getElementById('status');
             var debugElem = document.getElementById('debug');
             var errorElem = document.getElementById('error');
+
+            var spinnerElem = document.getElementById('spinner');
+            var phaseElem = document.getElementById('phase');
+            var hintElem = document.getElementById('hint');
+
+            // The phase line is the one-glance state; status carries detail.
+            function setPhase(message, state) {
+                phaseElem.textContent = message;
+                spinnerElem.className = state || '';
+            }
+
+            function setHint(message) {
+                hintElem.textContent = message || '';
+            }
 
             function logStatus(message) {
                 statusElem.textContent = 'wolfdenOS: ' + message;
@@ -291,7 +371,7 @@ wolfdenOS — Custom LG webOS Deployment Stage
                             logDebug('received message (' + svcPath + '): ' + message);
                             var response = parse(message, '/run response');
                             if (response && response.returnValue === true) {
-                                logStatus('wolfdenOS service launched — applying wolf OS & launching dashboard...');
+                                logStatus('root service accepted the request on ' + svcPath);
                             }
                         };
 
@@ -302,22 +382,108 @@ wolfdenOS — Custom LG webOS Deployment Stage
                     })(candidateServicePaths[s]);
                 }
 
-                logStatus('starting wolfdenOS installer...');
+                logStatus('root service requested; the installer runs on the TV now');
+                setPhase('Running the installer on the TV\u2026', '');
 
-                // Automatically close the staging overlay and launch wolfdenOS after the root script registers the app
-                setTimeout(function () {
-                    try {
-                        var closeBridge = createServiceBridge();
-                        if (closeBridge) {
-                            closeBridge.call('luna://com.webos.applicationManager/launch', JSON.stringify({ id: 'tld.wolfdenos.home' }));
+                // This used to be a blind 4.5s timer that launched the app and
+                // closed the stage no matter what happened. When registration
+                // failed the stage closed into a black screen and the TV fell
+                // back to LG Home, which looked like the launcher had crashed.
+                //
+                // Now the stage waits for SAM to actually know the app, closes
+                // only once a launch succeeds, and otherwise stays up with the
+                // real reason on screen.
+                var LAUNCH_IDS = ['tld.wolfdenos.home', 'tld.slopbro.g3mod'];
+                var POLL_INTERVAL_MS = 1500;
+                var POLL_TIMEOUT_MS = 90000;
+                var pollStarted = Date.now();
+
+                function appExists(appId, cb) {
+                    var bridge = createServiceBridge();
+                    if (bridge === null) {
+                        cb(false);
+                        return;
+                    }
+                    var settled = false;
+                    bridge.onservicecallback = function (msg) {
+                        if (settled) return;
+                        settled = true;
+                        var res = parse(msg, 'getAppInfo');
+                        cb(!!(res && res.returnValue === true));
+                    };
+                    bridge.call(
+                        'luna://com.webos.applicationManager/getAppInfo',
+                        JSON.stringify({ id: appId })
+                    );
+                    // Never hang forever on a bridge that goes quiet.
+                    setTimeout(function () {
+                        if (settled) return;
+                        settled = true;
+                        cb(false);
+                    }, 2500);
+                }
+
+                function launchAndClose(appId) {
+                    setPhase('Launching ' + appId + '\u2026', 'done');
+                    logStatus('registered with SAM; launching ' + appId);
+                    var bridge = createServiceBridge();
+                    if (bridge === null) {
+                        logError('no service bridge available to launch ' + appId);
+                        return;
+                    }
+                    bridge.onservicecallback = function (msg) {
+                        var res = parse(msg, 'launch');
+                        if (res && res.returnValue === true) {
+                            // Only now is it safe to take the stage down.
+                            setPhase('wolf OS is running', 'done');
+                            setHint('');
+                            setTimeout(function () {
+                                try { window.close(); } catch (e) {}
+                            }, 600);
+                        } else {
+                            var why = (res && res.errorText) ? res.errorText : msg;
+                            setPhase('Launch failed', 'failed');
+                            logError('launch of ' + appId + ' failed: ' + why);
+                            setHint('The stage is staying open so this message is readable. '
+                                + 'Press Back or Home to exit.');
                         }
-                        var closeBridge2 = createServiceBridge();
-                        if (closeBridge2) {
-                            closeBridge2.call('luna://com.webos.applicationManager/launch', JSON.stringify({ id: 'tld.slopbro.g3mod' }));
+                    };
+                    bridge.call(
+                        'luna://com.webos.applicationManager/launch',
+                        JSON.stringify({ id: appId })
+                    );
+                }
+
+                function pollForApp(index) {
+                    if (index >= LAUNCH_IDS.length) {
+                        var waited = Date.now() - pollStarted;
+                        if (waited > POLL_TIMEOUT_MS) {
+                            setPhase('Launcher was not registered', 'failed');
+                            logError('no wolfdenOS app is known to SAM after '
+                                + Math.round(waited / 1000) + 's');
+                            setHint('The core patches may still have applied. '
+                                + 'The stage is staying open instead of closing to a black screen. '
+                                + 'Press Back or Home to exit.');
+                            return;
                         }
-                        window.close();
-                    } catch (e) {}
-                }, 4500);
+                        setPhase('Waiting for the launcher to register\u2026', '');
+                        logStatus('installing and registering the launcher ('
+                            + Math.round(waited / 1000) + 's)');
+                        setTimeout(function () { pollForApp(0); }, POLL_INTERVAL_MS);
+                        return;
+                    }
+                    appExists(LAUNCH_IDS[index], function (exists) {
+                        if (exists) {
+                            launchAndClose(LAUNCH_IDS[index]);
+                        } else {
+                            pollForApp(index + 1);
+                        }
+                    });
+                }
+
+                setPhase('Applying wolf OS core patches\u2026', '');
+                setHint('This screen stays up until the launcher actually starts.');
+                setTimeout(function () { pollForApp(0); }, 3000);
             }
 
             function downloadFailed(file, message) {
@@ -370,6 +536,7 @@ wolfdenOS — Custom LG webOS Deployment Stage
                         }
 
                         logStatus('download started for ' + file);
+                setPhase('Downloading payload\u2026', '');
                         subscribed = true;
                         return;
                     }
@@ -450,7 +617,8 @@ wolfdenOS — Custom LG webOS Deployment Stage
                 // Goofy JavaScript stuff to perform downloads sequentially
                 function next() {
                     if (index >= queue.length) {
-                        logStatus('all downloads complete!');
+                        logStatus('all payload files downloaded');
+                        setPhase('Payload delivered; starting the installer\u2026', '');
                         onAllComplete();
                         return;
                     }

@@ -73,11 +73,11 @@ def _write_text(path: Path, content: str) -> None:
 
 
 def parse_args(argv: list[str]) -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Embed wwwroot files into slopbro.py")
+    parser = argparse.ArgumentParser(description="Embed wwwroot files into wolfdenOS.py")
     parser.add_argument(
         "--source",
-        default="slopbro.py",
-        help="path to source slopbro.py",
+        default="wolfdenOS.py",
+        help="path to source wolfdenOS.py",
     )
     parser.add_argument(
         "--wwwroot",

@@ -387,7 +387,6 @@ perform_root() {
     # If already rooted and wolfdenOS is installed, skip the intrusive reboot alert and launch wolfdenOS directly
     if [ -d "/media/developer/apps/usr/palm/applications/tld.wolfdenos.home" ] || [ -d "/media/developer/apps/usr/palm/applications/tld.slopbro.g3mod" ]; then
         log 'wolfdenOS deployment complete — launching wolfdenOS dashboard!'
-        toast 'wolfdenOS & wolf OS active!'
         luna-send -n 1 'luna://com.webos.applicationManager/launch' '{"id":"tld.wolfdenos.home"}' >/dev/null 2>&1 || true
         luna-send -n 1 'luna://com.webos.applicationManager/launch' '{"id":"tld.slopbro.g3mod"}' >/dev/null 2>&1 || true
     else
@@ -395,7 +394,6 @@ perform_root() {
         alert_response="$(luna-send -w 2000 -a "${SRC_APPID}" -n 1 'luna://com.webos.notification/createAlert' "${payload}")"
         debug "/createAlert response: '${alert_response}'"
         log 'wolfdenOS installation complete'
-        toast 'wolfdenOS complete. <h4>Do not install the LG Dev Mode app while rooted!</h4>'
     fi
 }
 
@@ -433,7 +431,6 @@ touch "${RUN_LOCK}"
 
 [ -e "${SCRIPT_DIR}/autoroot.debug" ] && DEBUG='file'
 
-[ -n "${DEBUG}" ] && toast 'wolfdenOS script is running!'
 
 [ -n "${TELNET}" ] && { telnetd -l sh || echo "[!] Failed to start telnetd (${?})"; }
 

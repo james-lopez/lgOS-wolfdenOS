@@ -633,7 +633,7 @@ export default function G3StudioPage() {
     if (!config) return;
     setRunning(true);
     setTerminalLog(
-      `[exec] Saving wolfdenOS payload to wwwroot/debloat_home.sh and rebuilding dist/woldenOs_packed.py...\n[exec] Running: python3 woldenOs.py --debug --webos-version 10 ${config.tvIp}\n[wait] Connecting to wss://${config.tvIp}:3001 ...`
+      `[exec] Saving wolfdenOS payload to wwwroot/debloat_home.sh and rebuilding dist/wolfdenOS_packed.py...\n[exec] Running: python3 wolfdenOS.py --debug --webos-version 10 ${config.tvIp}\n[wait] Connecting to wss://${config.tvIp}:3001 ...`
     );
     try {
       const res = await fetch("/api/slopbro", {
@@ -717,7 +717,7 @@ export default function G3StudioPage() {
               <Power className="w-4 h-4 text-orange-400" />
               Simulate TV Turn-On
             </Button>
-            <a href="/api/download?file=packed" download="woldenOs_packed.py">
+            <a href="/api/download?file=packed" download="wolfdenOS_packed.py">
               <Button
                 variant="outline"
                 size="sm"
@@ -1743,7 +1743,7 @@ export default function G3StudioPage() {
                   </p>
                 </div>
 
-                {/* Step 2: Clone & Run woldenOs.py over Wi-Fi */}
+                {/* Step 2: Clone & Run wolfdenOS.py over Wi-Fi */}
                 <div className="rounded-lg bg-zinc-950 border border-orange-500/30 p-3.5 space-y-2">
                   <div className="flex items-center justify-between">
                     <span className="text-xs font-semibold text-orange-300">
@@ -1756,7 +1756,7 @@ export default function G3StudioPage() {
                       onClick={() =>
                         copyText(
                           "runlan",
-                          `git clone https://github.com/${config.githubOwner}/${config.repoName}.git\ncd ${config.repoName}\npython3 -m pip install websockets\npython3 woldenOs.py --debug --webos-version 10 ${config.tvIp}`
+                          `git clone https://github.com/${config.githubOwner}/${config.repoName}.git\ncd ${config.repoName}\npython3 -m pip install websockets\npython3 wolfdenOS.py --debug --webos-version 10 ${config.tvIp}`
                         )
                       }
                     >
@@ -1772,7 +1772,7 @@ export default function G3StudioPage() {
                     {`git clone https://github.com/${config.githubOwner}/${config.repoName}.git
 cd ${config.repoName}
 python3 -m pip install websockets
-python3 woldenOs.py --debug --webos-version 10 ${config.tvIp}`}
+python3 wolfdenOS.py --debug --webos-version 10 ${config.tvIp}`}
                   </pre>
                   <p className="text-[11px] text-zinc-400">
                     When prompted on your LG G3 screen, click <strong className="text-white">Accept / Allow</strong> on the TV remote. SlopBro will root the TV, install Homebrew Channel, deploy your <code className="text-zinc-200">tld.slopbro.g3mod</code> custom launcher + stripped <code className="text-zinc-200">home.xml</code>, block all 28 LG ad/ACR domains, and bind your Magic Remote <strong className="text-white">HOME (773)</strong> button.

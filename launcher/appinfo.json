@@ -1,0 +1,20 @@
+{
+  "id": "tld.wolfdenos.home",
+  "version": "2.4.0",
+  "vendor": "wolfdenOS",
+  "type": "web",
+  "main": "index.html",
+  "title": "wolf OS",
+  "icon": "icon80.png",
+  "largeIcon": "icon130.png",
+  "extraLargeIcon": "icon160.png",
+  "bgColor": "#6d28d9",
+  "iconColor": "#6d28d9",
+  "transparent": false,
+  "handlesRelaunch": false,
+  "disableBackHistoryAPI": true,
+  "visible": true,
+  "appDescription": "wolfdenOS glass dock launcher",
+  "splashBackground": "splash.png",
+  "spinnerOnLaunch": false
+}

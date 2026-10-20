@@ -5,15 +5,15 @@
 # LG webOS Custom Home & Privacy Deployment Engine
 
 """
-woldenOs.py / wolfdenOS.py - Connect to an LG webOS TV over SSAP, pair, and
+wolfdenOS.py / wolfdenOS.py - Connect to an LG webOS TV over SSAP, pair, and
 deploy wolfdenOS (Custom Purplish Glass Dock Home + Native wolf OS Core Mods).
 
 Single file, standard library only. Requires Python 3 and should be run on
 a PC on the same LAN as the TV.
 
 Example:
-    python3 woldenOs.py 192.168.97.141
-    python3 woldenOs.py --debug --webos-version 10 192.168.97.141
+    python3 wolfdenOS.py 192.168.97.141
+    python3 wolfdenOS.py --debug --webos-version 10 192.168.97.141
 """
 
 import argparse
@@ -706,14 +706,45 @@ class RequestedFilesTracker:
             return len(self._tracked)
 
 
+DEFAULT_LOG_WAIT = 90
+LOG_PLACEHOLDER = b"__WOLFDEN_LOG_URL__"
+BASE_URL_PLACEHOLDER = b"__WOLFDEN_BASE_URL__"
+LOG_ENDPOINT_PATH = "/log"
+# The TV POSTs files here so they can be inspected on the laptop. busybox grep
+# cannot reliably report byte offsets inside a 10MB binary, so libapp.so is
+# pulled over and patched here instead of with shell byte surgery.
+UPLOAD_ENDPOINT_PATH = "/upload"
+LAUNCHER_IPK = "wolfdenos.ipk"
+HOME_BANNER = "home-banner.png"
+# One per stock banner size; apply.sh picks the match (see build_banner.py).
+HOME_BANNER_SIZES = (
+    "home-banner-1264x326.png",
+    "home-banner-1746x450.png",
+    "home-banner-3492x900.png",
+    "home-banner-3792x978.png",
+    "home-banner-1896x489.png",
+    "home-banner-1920x1080.png",
+)
+# Served on request but deliberately NOT tracked: debloat_home.sh fetches it
+# with curl, so counting it as a required file would stall wait_for_all().
+PATCHED_LIBAPP = "libapp.so"
+BACKGROUND_VIDEO = "bg.mp4"
+EXTRA_SERVABLE_FILES = (
+    (LAUNCHER_IPK, HOME_BANNER, PATCHED_LIBAPP, BACKGROUND_VIDEO)
+    + HOME_BANNER_SIZES
+)
+
+
 def make_tracking_handler(
     root_dir,
     tracker,
     tracked_files,
     allow_embedded_assets,
     allow_filesystem_fallback,
+    log_holder=None,
 ):
     tracked = set(tracked_files)
+    servable = tracked | set(EXTRA_SERVABLE_FILES)
 
     class TrackingHTTPRequestHandler(SimpleHTTPRequestHandler):
         def _requested_rel_path(self):
@@ -749,7 +780,7 @@ def make_tracking_handler(
 
         def send_head(self):
             rel_path = self._requested_rel_path()
-            if rel_path is None or rel_path not in tracked:
+            if rel_path is None or rel_path not in servable:
                 self.send_error(404, "File not found")
                 return None
 
@@ -762,8 +793,72 @@ def make_tracking_handler(
                 self.send_error(404, "File not found")
                 return None
 
+            if rel_path.endswith(".sh") and log_holder:
+                log_url = log_holder.get("url") or ""
+                base_url = log_holder.get("base") or ""
+                data = data.replace(LOG_PLACEHOLDER, log_url.encode("ascii"))
+                data = data.replace(BASE_URL_PLACEHOLDER, base_url.encode("ascii"))
+
             self._mark_served_file(rel_path)
             return self._send_bytes(rel_path, data)
+
+        def do_POST(self):
+            # The payload scripts POST their own stdout/stderr here so TV-side
+            # failures are visible on the laptop instead of vanishing into
+            # /dev/null on the TV.
+            request_path = urlsplit(self.path).path
+            if request_path.startswith(UPLOAD_ENDPOINT_PATH):
+                self._handle_upload(request_path)
+                return
+            if request_path != LOG_ENDPOINT_PATH:
+                self.send_error(404, "Not found")
+                return
+            try:
+                length = int(self.headers.get("Content-Length") or 0)
+            except ValueError:
+                length = 0
+            body = self.rfile.read(length) if length > 0 else b""
+            self.send_response(204)
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+            text = body.decode("utf-8", errors="replace").rstrip("\n")
+            for line in text.split("\n"):
+                if line.strip():
+                    log("[tv] %s" % line)
+
+        def _handle_upload(self, request_path):
+            name = posixpath.basename(request_path) or "upload.bin"
+            name = "".join(c for c in name if c.isalnum() or c in "._-")
+            if not name or name == "upload":
+                name = "upload.bin"
+            try:
+                length = int(self.headers.get("Content-Length") or 0)
+            except ValueError:
+                length = 0
+            dest_dir = os.path.join(root_dir or ".", "..", "uploads")
+            dest_dir = os.path.abspath(dest_dir)
+            os.makedirs(dest_dir, exist_ok=True)
+            dest = os.path.join(dest_dir, name)
+            written = 0
+            with open(dest, "wb") as fh:
+                remaining = length
+                while remaining > 0:
+                    chunk = self.rfile.read(min(65536, remaining))
+                    if not chunk:
+                        break
+                    fh.write(chunk)
+                    written += len(chunk)
+                    remaining -= len(chunk)
+            self.send_response(204)
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+            log("received upload: %s (%d bytes) -> %s" % (name, written, dest))
+
+        def log_message(self, fmt, *args):
+            # Suppress the access-log line for log POSTs; the body is printed.
+            if self.command == "POST":
+                return
+            SimpleHTTPRequestHandler.log_message(self, fmt, *args)
 
     return TrackingHTTPRequestHandler
 
@@ -778,14 +873,19 @@ def start_http_server(
     preferred_port=8080,
 ):
     """Start a tiny static file server rooted at root_dir."""
+    log_holder = {"url": None}
     handler = make_tracking_handler(
         root_dir,
         tracker,
         tracked_files,
         allow_embedded_assets,
         allow_filesystem_fallback,
+        log_holder=log_holder,
     )
-    return _start_http_server(handler, bind_host, preferred_port)
+    server = _start_http_server(handler, bind_host, preferred_port)
+    # The log URL needs the bound port, which only exists once the server is up.
+    server.log_holder = log_holder
+    return server
 
 
 def _start_http_server(handler, bind_host, preferred_port):
@@ -1010,6 +1110,7 @@ def run(
     webos_version_override=None,
     curl_insecure=False,
     fake_service_path=DEFAULT_FAKE_SERVICE_PATH,
+    log_wait=DEFAULT_LOG_WAIT,
 ):
     secure = True
     port = PORT_TLS if secure else PORT_PLAIN
@@ -1066,6 +1167,14 @@ def run(
     except Exception as exc:
         die("could not start self-hosted page server: %s" % exc)
     log("serving files from %s at %s" % (wwwroot_dir, page_url))
+
+    log_url = ""
+    if getattr(http_server, "log_holder", None) is not None:
+        parts = urlsplit(page_url)
+        log_url = "%s://%s%s" % (parts.scheme, parts.netloc, LOG_ENDPOINT_PATH)
+        http_server.log_holder["url"] = log_url
+        http_server.log_holder["base"] = "%s://%s/" % (parts.scheme, parts.netloc)
+        log("TV-side script output will be POSTed back to %s" % log_url)
 
     try:
         ws = WebSocket.connect(
@@ -1136,6 +1245,16 @@ def run(
             log("[wolfdenOS] launched wolfdenOS dashboard (tld.slopbro.g3mod) on TV!")
         except Exception:
             pass
+
+        if log_wait > 0 and log_url:
+            log(
+                "[wolfdenOS] holding server open %ds to collect TV-side logs "
+                "(ctrl-c to stop early)..." % log_wait
+            )
+            try:
+                time.sleep(log_wait)
+            except KeyboardInterrupt:
+                log("[wolfdenOS] log collection interrupted")
     finally:
         client.close()
         if http_server is not None:
@@ -1166,6 +1285,13 @@ def main(argv=None):
     )
     parser.add_argument(
         "--debug", action="store_true", help="enable payload debug output",
+    )
+    parser.add_argument(
+        "--log-wait", metavar="<seconds>", type=int, default=DEFAULT_LOG_WAIT,
+        help=(
+            "seconds to hold the HTTP server open after install to collect "
+            "TV-side script output (0 disables; default: %d)" % DEFAULT_LOG_WAIT
+        ),
     )
     parser.add_argument(
         "--curl-insecure", action="store_true",
@@ -1232,6 +1358,7 @@ def main(argv=None):
             webos_version_override=args.webos_version,
             curl_insecure=args.curl_insecure,
             fake_service_path=args.fake_service_path,
+            log_wait=args.log_wait,
         )
     return 0
 
