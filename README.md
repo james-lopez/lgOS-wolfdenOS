@@ -23,15 +23,14 @@ Designed and pre-configured for **LG `OLED65G3PUA` (`webOS 25 / 10.3.0-2504`)**,
 
 ## Plug-and-Play Quick Start (For Any LG webOS TV)
 
-### Option A: One-Command CLI Run (Zero Dependencies, Python 3 Standard Library Only)
+### Option A: One-Command CLI Run (Over Home Wi-Fi / LAN)
 
 ```bash
 git clone https://github.com/james-lopez/lgOS-getSlopped.git
 cd lgOS-getSlopped
-python3 slopbro.py --debug --webos-version 10 <YOUR_TV_IP>
+python3 -m pip install websockets
+python3 slopbro.py --debug --webos-version 10 192.168.97.141
 ```
-
-*(For your `OLED65G3PUA`: `python3 slopbro.py --debug --webos-version 10 192.168.97.141`)*
 
 ### Option B: Launch the Interactive UI Playground & Customizer First
 

@@ -21,6 +21,11 @@ import {
   Music,
   Server,
   Compass,
+  Sun,
+  Grid,
+  Settings,
+  Image as ImageIcon,
+  Layers,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -42,6 +47,8 @@ interface SidebarAppItem {
   subtitle: string;
   category: "Streaming" | "Media Server" | "Gaming & Inputs" | "System";
   accentColor: string;
+  tileBgColor: string;
+  tileTextColor: string;
   iconKey: string;
   enabled: boolean;
 }
@@ -57,13 +64,23 @@ interface G3ModConfig {
   curlInsecure: boolean;
   fakeServicePath: string;
   launcherTheme: {
-    activeSeason: "fall-pumpkin" | "winter-aurora" | "midnight-oled" | "custom";
+    uiParadigm: "cleanframe-list" | "piny-tiles" | "glass-dock";
+    focusTreatment: "type" | "glass" | "glow";
+    materialStyle: "clear-tint" | "frost" | "soft-oled";
+    activeSeason:
+      | "fall-pumpkin"
+      | "misty-autumn-coast"
+      | "moody-forest-oled"
+      | "winter-aurora"
+      | "midnight-oled";
     greetingTitle: string;
     greetingSubtitle: string;
     ambientParticles: boolean;
     turnOnAnimation: boolean;
     sidebarPosition: "left" | "right";
     sidebarStyle: "frosted-glass" | "pure-oled";
+    showContentShelves: boolean;
+    oledBrightness: number;
     autoHideSidebarSec: number;
     customWallpaperUrl: string;
   };
@@ -98,6 +115,7 @@ interface G3ModConfig {
   };
   keybinds: {
     installInputHook: boolean;
+    hijackHomeButton: boolean;
     mappings: Record<
       string,
       {
@@ -111,6 +129,7 @@ interface G3ModConfig {
 }
 
 const APP_PRESETS = [
+  { id: "tld.slopbro.g3mod", label: "lgOS-getSlopped Custom Home" },
   { id: "org.webosbrew.youtube.leanback.v4", label: "YouTube AdFree (Homebrew)" },
   { id: "org.jellyfin.webos", label: "Jellyfin" },
   { id: "org.moonfin.webos", label: "Moonfin (Jellyfin Client)" },
@@ -134,34 +153,58 @@ const FALL_LEAVES = [
   { left: "89%", delay: "2.8s", duration: "14s", size: 9, rot: 45 },
 ];
 
-function renderAppIcon(iconKey: string) {
+const AUTUMN_AMBIENT_SHELF = [
+  {
+    title: "Seaside Halloween Coffee Shop",
+    channel: "Little Lofi Cute · 4K OLED",
+    badge: "AUTUMN AMBIENCE",
+    gradient: "from-orange-900/90 via-amber-950 to-zinc-950",
+  },
+  {
+    title: "Warm Autumn Cabin Fireplace",
+    channel: "Warm Melody · Dolby Atmos",
+    badge: "COZY HARVEST",
+    gradient: "from-amber-800/90 via-red-950 to-zinc-950",
+  },
+  {
+    title: "Misty Coastal Drive · Big Sur",
+    channel: "CleanFrame 4K60 HDR",
+    badge: "SCENIC",
+    gradient: "from-teal-900/80 via-slate-900 to-zinc-950",
+  },
+];
+
+function renderAppIcon(iconKey: string, className = "w-4 h-4") {
   switch (iconKey) {
     case "youtube":
-      return <Play className="w-4 h-4 fill-current" />;
+      return <Play className={`${className} fill-current`} />;
     case "netflix":
     case "disney":
     case "prime":
-      return <Film className="w-4 h-4" />;
+    case "appletv":
+      return <Film className={className} />;
     case "jellyfin":
     case "plex":
-      return <Server className="w-4 h-4" />;
+      return <Server className={className} />;
     case "spotify":
-      return <Music className="w-4 h-4" />;
+      return <Music className={className} />;
     case "gamepad":
     case "moonlight":
-      return <Gamepad2 className="w-4 h-4" />;
+      return <Gamepad2 className={className} />;
     default:
-      return <Compass className="w-4 h-4" />;
+      return <Compass className={className} />;
   }
 }
 
 const INITIAL_SIDEBAR_APPS: SidebarAppItem[] = [
   {
     id: "org.webosbrew.youtube.leanback.v4",
-    name: "YouTube AdFree",
-    subtitle: "4K HDR · SponsorBlock · 0 Ads",
+    name: "YouTube",
+    subtitle: "AdFree 4K HDR · SponsorBlock",
     category: "Streaming",
-    accentColor: "#f97316",
+    accentColor: "#ef4444",
+    tileBgColor: "#ffffff",
+    tileTextColor: "#111111",
     iconKey: "youtube",
     enabled: true,
   },
@@ -170,17 +213,10 @@ const INITIAL_SIDEBAR_APPS: SidebarAppItem[] = [
     name: "Netflix",
     subtitle: "Dolby Vision · Atmos",
     category: "Streaming",
-    accentColor: "#ef4444",
+    accentColor: "#e50914",
+    tileBgColor: "#ffffff",
+    tileTextColor: "#e50914",
     iconKey: "netflix",
-    enabled: true,
-  },
-  {
-    id: "org.jellyfin.webos",
-    name: "Jellyfin",
-    subtitle: "Local Direct Play · 192.168.97.x",
-    category: "Media Server",
-    accentColor: "#a855f7",
-    iconKey: "jellyfin",
     enabled: true,
   },
   {
@@ -188,8 +224,21 @@ const INITIAL_SIDEBAR_APPS: SidebarAppItem[] = [
     name: "Plex",
     subtitle: "Cinema Library · TrueHD",
     category: "Media Server",
-    accentColor: "#f59e0b",
+    accentColor: "#e5a00d",
+    tileBgColor: "#1f2326",
+    tileTextColor: "#ffffff",
     iconKey: "plex",
+    enabled: true,
+  },
+  {
+    id: "org.jellyfin.webos",
+    name: "Jellyfin",
+    subtitle: "Direct Play · 192.168.97.x",
+    category: "Media Server",
+    accentColor: "#a855f7",
+    tileBgColor: "#1b1429",
+    tileTextColor: "#ffffff",
+    iconKey: "jellyfin",
     enabled: true,
   },
   {
@@ -197,17 +246,10 @@ const INITIAL_SIDEBAR_APPS: SidebarAppItem[] = [
     name: "Disney+",
     subtitle: "IMAX Enhanced · 4K",
     category: "Streaming",
-    accentColor: "#3b82f6",
+    accentColor: "#38bdf8",
+    tileBgColor: "#061539",
+    tileTextColor: "#ffffff",
     iconKey: "disney",
-    enabled: true,
-  },
-  {
-    id: "amazon",
-    name: "Prime Video",
-    subtitle: "UHD HDR10+",
-    category: "Streaming",
-    accentColor: "#06b6d4",
-    iconKey: "prime",
     enabled: true,
   },
   {
@@ -215,36 +257,66 @@ const INITIAL_SIDEBAR_APPS: SidebarAppItem[] = [
     name: "Spotify",
     subtitle: "Lossless eARC Audio",
     category: "Streaming",
-    accentColor: "#22c55e",
+    accentColor: "#1ed760",
+    tileBgColor: "#1ed760",
+    tileTextColor: "#000000",
     iconKey: "spotify",
     enabled: true,
   },
   {
-    id: "com.webos.app.hdmi1",
-    name: "HDMI 1 · PlayStation 5",
-    subtitle: "4K 120Hz · VRR · ALLM",
-    category: "Gaming & Inputs",
-    accentColor: "#6366f1",
-    iconKey: "gamepad",
-    enabled: true,
-  },
-  {
     id: "com.limelight.webos",
-    name: "Moonlight GameStream",
-    subtitle: "PC 4K 120fps · 0.8ms Decode",
+    name: "GeForce / Moonlight",
+    subtitle: "PC 4K 120Hz · 0.8ms",
     category: "Gaming & Inputs",
-    accentColor: "#eab308",
+    accentColor: "#76b900",
+    tileBgColor: "#1a1c1e",
+    tileTextColor: "#ffffff",
     iconKey: "moonlight",
     enabled: true,
   },
   {
-    id: "org.webosbrew.hbchannel",
-    name: "Homebrew Channel",
-    subtitle: "Root Services & System Mods",
-    category: "System",
-    accentColor: "#ec4899",
-    iconKey: "homebrew",
+    id: "com.apple.appletv",
+    name: "Apple TV",
+    subtitle: "4K Dolby Vision",
+    category: "Streaming",
+    accentColor: "#e4e4e7",
+    tileBgColor: "#18181b",
+    tileTextColor: "#ffffff",
+    iconKey: "appletv",
     enabled: true,
+  },
+  {
+    id: "amazon",
+    name: "Prime Video",
+    subtitle: "UHD HDR10+",
+    category: "Streaming",
+    accentColor: "#00a8e1",
+    tileBgColor: "#0f172a",
+    tileTextColor: "#ffffff",
+    iconKey: "prime",
+    enabled: true,
+  },
+  {
+    id: "com.webos.app.hdmi1",
+    name: "HDMI 1 · PS5",
+    subtitle: "4K 120Hz · VRR · ALLM",
+    category: "Gaming & Inputs",
+    accentColor: "#6366f1",
+    tileBgColor: "#171926",
+    tileTextColor: "#ffffff",
+    iconKey: "gamepad",
+    enabled: true,
+  },
+  {
+    id: "org.webosbrew.hbchannel",
+    name: "Homebrew",
+    subtitle: "Root Services & Mods",
+    category: "System",
+    accentColor: "#f97316",
+    tileBgColor: "#27170c",
+    tileTextColor: "#ffffff",
+    iconKey: "homebrew",
+    enabled: false,
   },
 ];
 
@@ -259,13 +331,18 @@ const INITIAL_CONFIG: G3ModConfig = {
   curlInsecure: false,
   fakeServicePath: "/usr/palm/services/com.palm.service.devmode",
   launcherTheme: {
+    uiParadigm: "cleanframe-list",
+    focusTreatment: "type",
+    materialStyle: "clear-tint",
     activeSeason: "fall-pumpkin",
     greetingTitle: "Autumn Harvest on G3 OLED",
-    greetingSubtitle: "Cozy Fall & Pumpkin Ambience · Instant Sidebar Navigation",
+    greetingSubtitle: "CleanFrame Typography + Piny Squircle Sidebar · Fall & Pumpkin Edition",
     ambientParticles: true,
     turnOnAnimation: true,
     sidebarPosition: "left",
     sidebarStyle: "frosted-glass",
+    showContentShelves: false,
+    oledBrightness: 82,
     autoHideSidebarSec: 15,
     customWallpaperUrl: "",
   },
@@ -300,7 +377,14 @@ const INITIAL_CONFIG: G3ModConfig = {
   },
   keybinds: {
     installInputHook: true,
+    hijackHomeButton: true,
     mappings: {
+      home: {
+        buttonName: "HOME Button (773)",
+        uinputCode: "773",
+        action: "launch",
+        targetAppId: "tld.slopbro.g3mod",
+      },
       netflix: {
         buttonName: "Netflix",
         uinputCode: "1037",
@@ -362,6 +446,7 @@ export default function G3StudioPage() {
   const [generatedKeybinds, setGeneratedKeybinds] = useState<string>(
     JSON.stringify(
       {
+        "773": { action: "launch", id: "tld.slopbro.g3mod" },
         "1037": { action: "launch", id: "org.webosbrew.youtube.leanback.v4" },
         "1039": { action: "launch", id: "org.jellyfin.webos" },
         "1043": { action: "ignore" },
@@ -387,7 +472,7 @@ export default function G3StudioPage() {
   const [saving, setSaving] = useState(false);
   const [running, setRunning] = useState(false);
   const [terminalLog, setTerminalLog] = useState<string>(
-    "[ready] Repo: github.com/james-lopez/lgOS-getSlopped\n[ready] Target: LG OLED65G3PUA @ 192.168.97.141 (webOS 25 / 10.3.0-2504)\n[ready] Theme: Fall & Pumpkin Harvest Turn-On + Seamless Sidebar Launcher"
+    "[ready] Repo: github.com/james-lopez/lgOS-getSlopped\n[ready] Target: LG OLED65G3PUA @ 192.168.97.141 (webOS 25 / 10.3.0-2504)\n[ready] Paradigms: CleanFrame Photo List + @iampiny Squircle Brand Sidebar + Fall Harvest Theme"
   );
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
 
@@ -406,7 +491,6 @@ export default function G3StudioPage() {
 
   const enabledApps = (config?.sidebarApps || []).filter((a) => a.enabled);
 
-  // Allow keyboard Up/Down/Enter navigation inside the interactive TV preview
   const handleKeyDown = useCallback(
     (e: KeyboardEvent) => {
       if (previewCompareMode !== "sidebar-seasonal" || enabledApps.length === 0) return;
@@ -446,7 +530,7 @@ export default function G3StudioPage() {
     setTvPowerState("turning-on");
     setTimeout(() => {
       setTvPowerState("on");
-    }, 1400);
+    }, 1200);
   };
 
   const syncConfig = async (nextConfig: G3ModConfig) => {
@@ -498,11 +582,7 @@ export default function G3StudioPage() {
             stderr || "(none)"
           }\n--- STDOUT ---\n${
             stdout || "(none)"
-          }\n\nNote: When you are ready to run this on your LAN (${
-            config.tvIp
-          }), download the single-file script or run from github.com/${
-            config.githubOwner
-          }/${config.repoName}.`
+          }\n\nNote: This Cloud VM is not on your home 192.168.97.x Wi-Fi/LAN. Run the exact command shown in Step 2 below on your laptop/Mac/PC on the same Wi-Fi as your OLED65G3PUA!`
         );
       }
     } catch (e: unknown) {
@@ -531,12 +611,13 @@ export default function G3StudioPage() {
   const focusedApp =
     enabledApps[selectedSidebarIdx] || enabledApps[0] || config.sidebarApps[0];
   const season = config.launcherTheme.activeSeason;
+  const paradigm = config.launcherTheme.uiParadigm || "cleanframe-list";
 
   return (
     <div className="min-h-screen bg-zinc-950 text-zinc-100 selection:bg-orange-500/30">
       {/* Top Header Bar */}
       <header className="border-b border-zinc-800/80 bg-zinc-950/90 backdrop-blur sticky top-0 z-30">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 py-3.5 flex flex-wrap items-center justify-between gap-4">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 py-3 flex flex-wrap items-center justify-between gap-4">
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-orange-500/20 to-amber-500/10 border border-orange-500/40 flex items-center justify-center text-orange-400 shadow-lg shadow-orange-950/50">
               <Flame className="w-5 h-5" />
@@ -550,11 +631,11 @@ export default function G3StudioPage() {
                   github.com/{config.githubOwner}/{config.repoName}
                 </Badge>
                 <Badge className="bg-emerald-500/15 text-emerald-300 border-emerald-500/30 text-xs">
-                  OLED65G3PUA · webOS 25 (10.3.0)
+                  OLED65G3PUA · webOS 25 (10.3.0-2504)
                 </Badge>
               </div>
               <p className="text-xs text-zinc-400">
-                Interactive Sidebar Launcher + Seasonal Fall/Pumpkin Turn-On Ambience + Plug-and-Play SlopBro Root Suite
+                CleanFrame Typography List + @iampiny Brand-Tile Sidebar + Seasonal Fall/Pumpkin Turn-On
               </p>
             </div>
           </div>
@@ -576,7 +657,7 @@ export default function G3StudioPage() {
                 className="border-zinc-700 bg-zinc-900 hover:bg-zinc-800 text-zinc-100 gap-2"
               >
                 <Download className="w-4 h-4 text-emerald-400" />
-                Download Plug-and-Play (.py)
+                Download Single-File (.py)
               </Button>
             </a>
             <Button
@@ -590,29 +671,129 @@ export default function G3StudioPage() {
               ) : (
                 <Play className="w-4 h-4" />
               )}
-              Deploy to {config.tvIp}
+              Test Probe ({config.tvIp})
             </Button>
           </div>
         </div>
       </header>
 
-      <main className="max-w-7xl mx-auto px-4 sm:px-6 py-6 space-y-6">
+      <main className="max-w-7xl mx-auto px-4 sm:px-6 py-5 space-y-6">
+        {/* DESIGN STUDY LAB BAR (Inspired directly by CleanFrame & @iampiny) */}
+        <div className="rounded-xl bg-zinc-900/90 border border-zinc-800 px-4 py-3 flex flex-wrap items-center justify-between gap-3">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-[11px] font-mono uppercase tracking-wider text-zinc-400 mr-1">
+              LAYOUT PARADIGM:
+            </span>
+            {[
+              {
+                id: "cleanframe-list" as const,
+                label: "CleanFrame Photo List (Typography)",
+              },
+              {
+                id: "piny-tiles" as const,
+                label: "Piny Brand Tiles (@iampiny)",
+              },
+              {
+                id: "glass-dock" as const,
+                label: "Frosted Glass Sidebar",
+              },
+            ].map((item) => (
+              <button
+                key={item.id}
+                type="button"
+                onClick={() => {
+                  setPreviewCompareMode("sidebar-seasonal");
+                  syncConfig({
+                    ...config,
+                    launcherTheme: {
+                      ...config.launcherTheme,
+                      uiParadigm: item.id,
+                    },
+                  });
+                }}
+                className={`px-3 py-1 rounded-md text-xs font-medium transition ${
+                  paradigm === item.id && previewCompareMode === "sidebar-seasonal"
+                    ? "bg-white text-black shadow-sm"
+                    : "bg-zinc-950 text-zinc-300 hover:text-white border border-zinc-800"
+                }`}
+              >
+                {item.label}
+              </button>
+            ))}
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-[11px] font-mono uppercase tracking-wider text-zinc-400">
+              WALLPAPER:
+            </span>
+            {[
+              { id: "fall-pumpkin" as const, label: "Harvest Pumpkins" },
+              { id: "misty-autumn-coast" as const, label: "Misty Autumn Coast" },
+              { id: "moody-forest-oled" as const, label: "Piny Forest Glow" },
+              { id: "midnight-oled" as const, label: "Pure OLED" },
+            ].map((wp) => (
+              <button
+                key={wp.id}
+                type="button"
+                onClick={() =>
+                  syncConfig({
+                    ...config,
+                    launcherTheme: {
+                      ...config.launcherTheme,
+                      activeSeason: wp.id,
+                    },
+                  })
+                }
+                className={`px-2.5 py-1 rounded-md text-xs transition ${
+                  season === wp.id
+                    ? "bg-orange-600 text-white font-medium"
+                    : "bg-zinc-950 text-zinc-400 hover:text-white border border-zinc-800"
+                }`}
+              >
+                {wp.label}
+              </button>
+            ))}
+
+            <button
+              type="button"
+              onClick={() =>
+                syncConfig({
+                  ...config,
+                  launcherTheme: {
+                    ...config.launcherTheme,
+                    showContentShelves: !config.launcherTheme.showContentShelves,
+                  },
+                })
+              }
+              className={`px-2.5 py-1 rounded-md text-xs transition border ${
+                config.launcherTheme.showContentShelves
+                  ? "bg-amber-500/20 border-amber-400/50 text-amber-200"
+                  : "bg-zinc-950 border-zinc-800 text-zinc-400 hover:text-white"
+              }`}
+            >
+              {config.launcherTheme.showContentShelves
+                ? "Ambient Shelf: ON"
+                : "Pure Canvas (No Shelves)"}
+            </button>
+          </div>
+        </div>
+
         {/* Main Two-Column Layout */}
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
-          {/* Left 7 Columns: Interactive OLED65G3PUA TV Simulator + Remote + Inspo Video Compare */}
+          {/* Left 7 Columns: Interactive OLED65G3PUA TV Simulator + Remote + Inspo Reference */}
           <div className="lg:col-span-7 space-y-6">
             <Card className="bg-zinc-900/80 border-zinc-800 overflow-hidden shadow-2xl">
               <CardHeader className="pb-3 border-b border-zinc-800/80 flex flex-row flex-wrap items-center justify-between gap-2">
                 <div>
                   <CardTitle className="text-base text-white flex items-center gap-2">
                     <Sparkles className="w-4 h-4 text-orange-400" />
-                    Interactive OLED65G3PUA Launcher Playground
+                    OLED65G3PUA Interactive TV Preview
                   </CardTitle>
                   <CardDescription className="text-xs text-zinc-400">
-                    Use <kbd className="px-1.5 py-0.5 bg-zinc-800 rounded text-zinc-200">↑</kbd>{" "}
+                    Remote keys active: <kbd className="px-1.5 py-0.5 bg-zinc-800 rounded text-zinc-200">↑</kbd>{" "}
                     <kbd className="px-1.5 py-0.5 bg-zinc-800 rounded text-zinc-200">↓</kbd>{" "}
-                    <kbd className="px-1.5 py-0.5 bg-zinc-800 rounded text-zinc-200">Enter</kbd>{" "}
-                    or click any app in the sidebar to test navigation & turn-on feel
+                    move · <kbd className="px-1.5 py-0.5 bg-zinc-800 rounded text-zinc-200">Enter</kbd> = OK ·{" "}
+                    <kbd className="px-1.5 py-0.5 bg-zinc-800 rounded text-zinc-200">Esc</kbd> = Back
                   </CardDescription>
                 </div>
 
@@ -626,7 +807,7 @@ export default function G3StudioPage() {
                         : "text-zinc-400 hover:text-white"
                     }`}
                   >
-                    Sidebar + Fall Theme
+                    Custom Home
                   </button>
                   <button
                     type="button"
@@ -637,7 +818,7 @@ export default function G3StudioPage() {
                         : "text-zinc-400 hover:text-white"
                     }`}
                   >
-                    Minimal Bottom Bar
+                    Debloated XML Bar
                   </button>
                   <button
                     type="button"
@@ -653,9 +834,16 @@ export default function G3StudioPage() {
                 </div>
               </CardHeader>
 
-              <CardContent className="p-5">
+              <CardContent className="p-4 sm:p-5">
                 {/* 16:9 LG OLED65G3PUA Bezel */}
-                <div className="relative aspect-video w-full rounded-xl border-[5px] border-zinc-800 bg-black shadow-2xl overflow-hidden select-none">
+                <div
+                  className="relative aspect-video w-full rounded-xl border-[5px] border-zinc-800 bg-black shadow-2xl overflow-hidden select-none"
+                  style={{
+                    filter: `brightness(${
+                      0.45 + (config.launcherTheme.oledBrightness || 82) * 0.0055
+                    })`,
+                  }}
+                >
                   {/* Turn-On OLED Curtain Transition */}
                   {tvPowerState === "turning-on" && (
                     <div className="absolute inset-0 z-40 bg-black flex flex-col items-center justify-center animate-pulse">
@@ -663,7 +851,7 @@ export default function G3StudioPage() {
                         <Flame className="w-10 h-10 text-orange-400" />
                       </div>
                       <p className="text-sm font-medium tracking-widest uppercase text-orange-200">
-                        OLED65G3PUA · Warming Up Fall Harvest Scene...
+                        OLED65G3PUA · Launching Custom Home...
                       </p>
                       <p className="text-[11px] font-mono text-zinc-500 mt-1">
                         0 Ads · 0 Telemetry · Instant Sidebar Ready
@@ -672,30 +860,19 @@ export default function G3StudioPage() {
                   )}
 
                   {previewCompareMode === "sidebar-seasonal" ? (
-                    /* =========================================================
-                       MODE 1: SEAMLESS SIDEBAR + SEASONAL FALL & PUMPKIN SCENE
-                       ========================================================= */
                     <div className="relative w-full h-full flex overflow-hidden">
-                      {/* Seasonal Background Layer */}
+                      {/* =================================================
+                         BACKGROUND SCENE LAYER (Fall Pumpkins / Misty Coast / Moody OLED)
+                         ================================================= */}
                       {season === "fall-pumpkin" && (
                         <div className="absolute inset-0 bg-gradient-to-br from-[#120703] via-[#261005] to-[#090402]">
-                          {/* Warm Autumn Moon & Lantern Glows */}
                           <div
-                            className="absolute -top-16 right-12 w-72 h-72 rounded-full opacity-40 blur-3xl pointer-events-none"
+                            className="absolute -top-16 right-12 w-72 h-72 rounded-full opacity-45 blur-3xl pointer-events-none"
                             style={{
                               background:
-                                "radial-gradient(circle, rgba(249,115,22,0.65) 0%, rgba(180,83,9,0.2) 60%, transparent 100%)",
+                                "radial-gradient(circle, rgba(249,115,22,0.68) 0%, rgba(180,83,9,0.22) 60%, transparent 100%)",
                             }}
                           />
-                          <div
-                            className="absolute bottom-0 right-1/4 w-96 h-56 rounded-full opacity-35 blur-3xl pointer-events-none"
-                            style={{
-                              background:
-                                "radial-gradient(circle, rgba(245,158,11,0.5) 0%, rgba(124,45,18,0.15) 70%, transparent 100%)",
-                            }}
-                          />
-
-                          {/* Vector Autumn Hills, Forest & Glowing Pumpkins SVG */}
                           <svg
                             viewBox="0 0 1200 675"
                             className="absolute inset-0 w-full h-full object-cover pointer-events-none opacity-90"
@@ -721,36 +898,24 @@ export default function G3StudioPage() {
                                 <stop offset="100%" stopColor="#9a3412" />
                               </radialGradient>
                             </defs>
-
-                            {/* Harvest Moon */}
                             <circle cx="930" cy="150" r="175" fill="url(#harvestMoon)" />
                             <circle cx="930" cy="150" r="52" fill="#fef3c7" fillOpacity="0.88" />
-
-                            {/* Distant Autumn Hills */}
                             <path
                               d="M0,470 Q320,380 650,455 T1200,420 L1200,675 L0,675 Z"
                               fill="url(#hillBack)"
                             />
-                            {/* Foreground Silhouette Ridge */}
                             <path
                               d="M0,535 Q420,470 820,530 T1200,505 L1200,675 L0,675 Z"
                               fill="url(#hillFront)"
                             />
-
-                            {/* Warm Glowing Jack-O'-Lantern / Pumpkins Cluster on Right Ridge */}
-                            {/* Large Main Pumpkin */}
                             <g transform="translate(880, 485)">
                               <ellipse cx="0" cy="48" rx="68" ry="14" fill="#000" opacity="0.55" />
-                              <path
-                                d="M-10,-32 Q-4,-48 8,-44 Q4,-30 6,-22 Z"
-                                fill="#3f230f"
-                              />
+                              <path d="M-10,-32 Q-4,-48 8,-44 Q4,-30 6,-22 Z" fill="#3f230f" />
                               <ellipse cx="-24" cy="10" rx="28" ry="34" fill="#c2410c" />
                               <ellipse cx="24" cy="10" rx="28" ry="34" fill="#c2410c" />
                               <ellipse cx="-12" cy="12" rx="26" ry="36" fill="#ea580c" />
                               <ellipse cx="12" cy="12" rx="26" ry="36" fill="#ea580c" />
                               <ellipse cx="0" cy="12" rx="22" ry="37" fill="#f97316" />
-                              {/* Warm Carved Eyes & Smile Glow */}
                               <polygon points="-18,2 -8,-10 -2,2" fill="url(#pumpkinGlow)" />
                               <polygon points="18,2 8,-10 2,2" fill="url(#pumpkinGlow)" />
                               <path
@@ -758,50 +923,57 @@ export default function G3StudioPage() {
                                 fill="url(#pumpkinGlow)"
                               />
                             </g>
-
-                            {/* Second Cozy Pumpkin */}
                             <g transform="translate(975, 512) scale(0.72)">
                               <ellipse cx="0" cy="45" rx="52" ry="11" fill="#000" opacity="0.5" />
-                              <path
-                                d="M-6,-28 Q0,-42 10,-38 Q5,-26 6,-18 Z"
-                                fill="#3f230f"
-                              />
                               <ellipse cx="-18" cy="10" rx="24" ry="30" fill="#9a3412" />
                               <ellipse cx="18" cy="10" rx="24" ry="30" fill="#9a3412" />
                               <ellipse cx="0" cy="11" rx="24" ry="32" fill="#d97706" />
                             </g>
-
-                            {/* Third Small Gourd */}
-                            <g transform="translate(805, 520) scale(0.58)">
-                              <ellipse cx="0" cy="42" rx="45" ry="10" fill="#000" opacity="0.5" />
-                              <ellipse cx="-15" cy="10" rx="22" ry="28" fill="#b45309" />
-                              <ellipse cx="15" cy="10" rx="22" ry="28" fill="#b45309" />
-                              <ellipse cx="0" cy="11" rx="20" ry="29" fill="#f59e0b" />
-                            </g>
                           </svg>
-
-                          {/* Floating Autumn Leaves & Embers */}
-                          {config.launcherTheme.ambientParticles &&
-                            FALL_LEAVES.map((leaf, i) => (
-                              <div
-                                key={i}
-                                className="absolute pointer-events-none text-orange-400/50 animate-pulse"
-                                style={{
-                                  left: leaf.left,
-                                  top: `${18 + ((i * 13) % 55)}%`,
-                                  transform: `rotate(${leaf.rot}deg)`,
-                                }}
-                              >
-                                <span
-                                  className="inline-block rounded-tl-full rounded-br-full bg-gradient-to-br from-orange-400/70 to-amber-600/40 shadow-sm shadow-orange-500/30"
-                                  style={{
-                                    width: `${leaf.size}px`,
-                                    height: `${leaf.size}px`,
-                                  }}
-                                />
-                              </div>
-                            ))}
+                          {/* Scrim for CleanFrame left typography legibility */}
+                          <div className="absolute inset-0 bg-gradient-to-r from-black/75 via-black/30 to-transparent pointer-events-none" />
                         </div>
+                      )}
+
+                      {season === "misty-autumn-coast" && (
+                        <div className="absolute inset-0 bg-gradient-to-br from-[#1d2b32] via-[#2b3938] to-[#121614]">
+                          <svg
+                            viewBox="0 0 1200 675"
+                            className="absolute inset-0 w-full h-full object-cover pointer-events-none"
+                            preserveAspectRatio="xMidYMid slice"
+                          >
+                            <defs>
+                              <linearGradient id="mistSky" x1="0" y1="0" x2="1" y2="1">
+                                <stop offset="0%" stopColor="#354f59" />
+                                <stop offset="55%" stopColor="#5c7278" />
+                                <stop offset="100%" stopColor="#26353a" />
+                              </linearGradient>
+                            </defs>
+                            <rect width="1200" height="675" fill="url(#mistSky)" />
+                            {/* Misty Sea Stacks & Autumn Headlands (CleanFrame style) */}
+                            <path
+                              d="M0,180 Q280,260 440,390 L520,675 L0,675 Z"
+                              fill="#241c15"
+                            />
+                            <path
+                              d="M0,340 Q260,420 580,675 L0,675 Z"
+                              fill="#3b2614"
+                            />
+                            <polygon points="560,455 620,395 685,460" fill="#1d2426" />
+                            <polygon points="735,445 795,380 850,450" fill="#171e20" />
+                          </svg>
+                          <div className="absolute inset-0 bg-gradient-to-r from-black/70 via-black/25 to-transparent pointer-events-none" />
+                        </div>
+                      )}
+
+                      {season === "moody-forest-oled" && (
+                        <div
+                          className="absolute inset-0"
+                          style={{
+                            background:
+                              "radial-gradient(circle at 62% 48%, #16261d 0%, #0b120e 48%, #040504 100%)",
+                          }}
+                        />
                       )}
 
                       {season === "winter-aurora" && (
@@ -812,199 +984,388 @@ export default function G3StudioPage() {
                         <div className="absolute inset-0 bg-black" />
                       )}
 
-                      {/* Main Layout Container (Left or Right Sidebar) */}
-                      <div
-                        className={`relative z-10 w-full h-full flex ${
-                          config.launcherTheme.sidebarPosition === "right"
-                            ? "flex-row-reverse"
-                            : "flex-row"
-                        }`}
-                      >
-                        {/* SEAMLESS SIDEBAR DOCK */}
-                        <div
-                          className={`w-64 sm:w-72 h-full flex flex-col justify-between p-3.5 transition-all ${
-                            config.launcherTheme.sidebarStyle === "pure-oled"
-                              ? "bg-black/95 border-r border-zinc-900"
-                              : "bg-black/65 backdrop-blur-xl border-r border-orange-500/20"
-                          }`}
-                        >
-                          {/* Sidebar Header */}
-                          <div className="flex items-center justify-between px-2 pt-1 pb-2 border-b border-white/10">
-                            <div className="flex items-center gap-2">
-                              <span className="w-2.5 h-2.5 rounded-full bg-orange-400 shadow-sm shadow-orange-400" />
-                              <span className="text-xs font-semibold tracking-wide text-orange-100">
-                                Quick Apps
-                              </span>
+                      {/* Floating Autumn Leaves */}
+                      {config.launcherTheme.ambientParticles &&
+                        FALL_LEAVES.map((leaf, i) => (
+                          <div
+                            key={i}
+                            className="absolute pointer-events-none text-orange-400/50 animate-pulse"
+                            style={{
+                              left: leaf.left,
+                              top: `${18 + ((i * 13) % 55)}%`,
+                              transform: `rotate(${leaf.rot}deg)`,
+                            }}
+                          >
+                            <span
+                              className="inline-block rounded-tl-full rounded-br-full bg-gradient-to-br from-orange-400/70 to-amber-600/40"
+                              style={{
+                                width: `${leaf.size}px`,
+                                height: `${leaf.size}px`,
+                              }}
+                            />
+                          </div>
+                        ))}
+
+                      {/* =================================================
+                         PARADIGM A: CLEANFRAME PHOTO LIST (Typography-First)
+                         ================================================= */}
+                      {paradigm === "cleanframe-list" && (
+                        <div className="relative z-10 w-full h-full flex flex-col justify-between px-8 py-6">
+                          {/* Top Bar: 9:41 Clock on Left + CleanFrame 3 Minimal Outline Icons on Right */}
+                          <div className="flex items-center justify-between">
+                            <div className="text-3xl sm:text-4xl font-light tracking-tight text-white/95">
+                              9:41
                             </div>
-                            <span className="text-[10px] font-mono text-orange-300/80">
-                              HOME · 773
-                            </span>
+                            <div className="flex items-center gap-3 text-white/80">
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  syncConfig({
+                                    ...config,
+                                    launcherTheme: {
+                                      ...config.launcherTheme,
+                                      activeSeason:
+                                        season === "fall-pumpkin"
+                                          ? "misty-autumn-coast"
+                                          : "fall-pumpkin",
+                                    },
+                                  })
+                                }
+                                title="Switch Wallpaper"
+                                className="p-2 rounded-lg hover:bg-white/10 transition"
+                              >
+                                <ImageIcon className="w-4 h-4" />
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  syncConfig({
+                                    ...config,
+                                    launcherTheme: {
+                                      ...config.launcherTheme,
+                                      uiParadigm: "piny-tiles",
+                                    },
+                                  })
+                                }
+                                title="Switch to Brand Tiles"
+                                className="p-2 rounded-lg hover:bg-white/10 transition"
+                              >
+                                <Grid className="w-4 h-4" />
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  syncConfig({
+                                    ...config,
+                                    launcherTheme: {
+                                      ...config.launcherTheme,
+                                      showContentShelves:
+                                        !config.launcherTheme.showContentShelves,
+                                    },
+                                  })
+                                }
+                                title="Toggle Ambient Shelf"
+                                className="p-2 rounded-lg hover:bg-white/10 transition"
+                              >
+                                <Settings className="w-4 h-4" />
+                              </button>
+                            </div>
                           </div>
 
-                          {/* Major Apps Vertical Rail */}
-                          <div className="my-2 flex-1 space-y-1 overflow-y-auto pr-1">
-                            {enabledApps.map((app, idx) => {
-                              const isSelected = idx === selectedSidebarIdx;
-                              return (
-                                <button
-                                  key={app.id}
-                                  type="button"
-                                  onClick={() => {
-                                    setSelectedSidebarIdx(idx);
-                                    setActiveLaunchedApp(null);
-                                  }}
-                                  onDoubleClick={() => setActiveLaunchedApp(app)}
-                                  className={`w-full flex items-center gap-3 px-2.5 py-2 rounded-xl text-left transition-all duration-150 ${
-                                    isSelected
-                                      ? "bg-gradient-to-r from-orange-500/30 via-amber-500/15 to-transparent border border-orange-400/60 shadow-lg shadow-orange-950/60 scale-[1.01]"
-                                      : "hover:bg-white/5 border border-transparent text-zinc-400"
-                                  }`}
-                                >
-                                  <div
-                                    className="w-7 h-7 rounded-lg flex items-center justify-center shrink-0 text-white shadow"
-                                    style={{
-                                      backgroundColor: isSelected
-                                        ? app.accentColor
-                                        : "rgba(39,39,42,0.85)",
+                          {/* Main Middle: Large Monochrome Icon + Bold Sans Typography List */}
+                          <div className="my-auto flex items-center justify-between gap-6">
+                            <div className="space-y-1.5 sm:space-y-2">
+                              {enabledApps.slice(0, 6).map((app, idx) => {
+                                const isSelected = idx === selectedSidebarIdx;
+                                return (
+                                  <button
+                                    key={app.id}
+                                    type="button"
+                                    onClick={() => {
+                                      setSelectedSidebarIdx(idx);
+                                      setActiveLaunchedApp(null);
                                     }}
+                                    onDoubleClick={() => setActiveLaunchedApp(app)}
+                                    className={`group flex items-center gap-3.5 text-left transition-all duration-150 ${
+                                      config.launcherTheme.focusTreatment === "glass" &&
+                                      isSelected
+                                        ? "bg-white/15 backdrop-blur-md px-4 py-1.5 rounded-xl border border-white/25"
+                                        : "px-1 py-0.5"
+                                    }`}
                                   >
-                                    {renderAppIcon(app.iconKey)}
-                                  </div>
-                                  <div className="min-w-0 flex-1">
-                                    <div
-                                      className={`text-xs font-medium truncate ${
-                                        isSelected ? "text-white" : "text-zinc-300"
+                                    <span
+                                      className={`transition-opacity ${
+                                        isSelected
+                                          ? "text-white opacity-100 scale-110"
+                                          : "text-white/55 opacity-60 group-hover:opacity-85"
+                                      }`}
+                                    >
+                                      {renderAppIcon(app.iconKey, "w-5 h-5 sm:w-6 sm:h-6")}
+                                    </span>
+                                    <span
+                                      className={`text-xl sm:text-3xl font-semibold tracking-tight transition-all ${
+                                        isSelected
+                                          ? "text-white drop-shadow-[0_4px_24px_rgba(249,115,22,0.55)]"
+                                          : "text-white/55 group-hover:text-white/80"
                                       }`}
                                     >
                                       {app.name}
-                                    </div>
-                                    <div className="text-[10px] text-zinc-400 truncate">
-                                      {app.subtitle}
-                                    </div>
-                                  </div>
-                                  {isSelected && (
-                                    <span className="text-[9px] font-mono px-1.5 py-0.5 rounded bg-orange-500/20 text-orange-200 border border-orange-400/30">
-                                      OK
                                     </span>
-                                  )}
-                                </button>
-                              );
-                            })}
+                                  </button>
+                                );
+                              })}
+                            </div>
+
+                            {/* Optional Ambient Content Shelf or Active Launch Overlay */}
+                            {activeLaunchedApp ? (
+                              <div className="max-w-xs rounded-2xl bg-black/80 backdrop-blur-xl border border-orange-400/50 p-4 text-center space-y-2.5 shadow-2xl">
+                                <p className="text-[10px] font-mono uppercase tracking-widest text-orange-300">
+                                  luna://com.webos.applicationManager/launch
+                                </p>
+                                <h3 className="text-base font-semibold text-white">
+                                  Opening {activeLaunchedApp.name}
+                                </h3>
+                                <p className="text-[11px] text-zinc-400 font-mono">
+                                  {activeLaunchedApp.id}
+                                </p>
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  onClick={() => setActiveLaunchedApp(null)}
+                                  className="h-7 text-xs border-zinc-700 bg-zinc-900 text-zinc-200"
+                                >
+                                  Esc / Back to Home
+                                </Button>
+                              </div>
+                            ) : config.launcherTheme.showContentShelves ? (
+                              <div className="hidden sm:flex flex-col gap-2.5 max-w-md bg-black/45 backdrop-blur-md p-3.5 rounded-2xl border border-white/10">
+                                <div className="text-xs font-medium text-white/90">
+                                  Recommended Autumn Ambience for You
+                                </div>
+                                <div className="grid grid-cols-3 gap-2.5">
+                                  {AUTUMN_AMBIENT_SHELF.map((card, i) => (
+                                    <div
+                                      key={card.title}
+                                      className={`rounded-xl p-2.5 bg-gradient-to-br ${
+                                        card.gradient
+                                      } border ${
+                                        i === 0
+                                          ? "border-white/80 scale-[1.03]"
+                                          : "border-white/10 opacity-80"
+                                      }`}
+                                    >
+                                      <span className="text-[8px] font-mono uppercase px-1.5 py-0.5 rounded bg-black/50 text-orange-200">
+                                        {card.badge}
+                                      </span>
+                                      <p className="text-[11px] font-medium text-white mt-3 line-clamp-2">
+                                        {card.title}
+                                      </p>
+                                      <p className="text-[9px] text-zinc-300 mt-0.5 truncate">
+                                        {card.channel}
+                                      </p>
+                                    </div>
+                                  ))}
+                                </div>
+                              </div>
+                            ) : null}
                           </div>
 
-                          {/* Sidebar Footer Status */}
-                          <div className="pt-2 border-t border-white/10 flex items-center justify-between px-2 text-[10px] text-zinc-400">
-                            <span>eARC: Atmos Ready</span>
-                            <span className="text-emerald-400 font-mono">
-                              ACR/Ads: 0
+                          {/* Bottom Minimal Seasonal Pill */}
+                          <div className="flex items-center justify-between text-[11px] text-white/70">
+                            <span>
+                              {config.launcherTheme.greetingTitle} ·{" "}
+                              <strong className="text-white">{focusedApp?.name}</strong>{" "}
+                              ({focusedApp?.subtitle})
+                            </span>
+                            <span className="font-mono text-[10px] text-white/60">
+                              Enter opens selected app
                             </span>
                           </div>
                         </div>
+                      )}
 
-                        {/* RIGHT AMBIENT CANVAS STAGE */}
-                        <div className="flex-1 h-full flex flex-col justify-between p-6 relative">
-                          {/* Top Clock & Autumn Weather Pill */}
-                          <div className="flex items-start justify-between">
-                            <div className="space-y-0.5">
-                              <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-orange-950/60 border border-orange-500/30 text-[10px] text-orange-200">
-                                <Flame className="w-3 h-3 text-orange-400" />
-                                <span>{config.launcherTheme.greetingTitle}</span>
-                              </div>
-                              <p className="text-[11px] text-orange-100/70 pl-1 pt-0.5">
-                                {config.launcherTheme.greetingSubtitle}
-                              </p>
+                      {/* =================================================
+                         PARADIGM B: @IAMPINY BRAND-TILE SQUIRCLE SIDEBAR
+                         ================================================= */}
+                      {paradigm === "piny-tiles" && (
+                        <div className="relative z-10 w-full h-full flex justify-between px-6 py-5">
+                          {/* Left Column: Squircle Brand Tiles + Bottom Utility Links */}
+                          <div className="flex flex-col justify-between h-full">
+                            <div className="flex flex-col gap-2.5">
+                              {enabledApps.slice(0, 5).map((app, idx) => {
+                                const isSelected = idx === selectedSidebarIdx;
+                                return (
+                                  <button
+                                    key={app.id}
+                                    type="button"
+                                    onClick={() => {
+                                      setSelectedSidebarIdx(idx);
+                                      setActiveLaunchedApp(null);
+                                    }}
+                                    onDoubleClick={() => setActiveLaunchedApp(app)}
+                                    style={{
+                                      backgroundColor: app.tileBgColor || "#1f2326",
+                                      color: app.tileTextColor || "#ffffff",
+                                    }}
+                                    className={`relative w-28 sm:w-32 h-14 sm:h-16 rounded-2xl flex flex-col items-center justify-center px-2 transition-all duration-150 ${
+                                      isSelected
+                                        ? "scale-105 ring-2 ring-white shadow-[0_-8px_25px_rgba(255,255,255,0.65)] z-10"
+                                        : "opacity-75 hover:opacity-95"
+                                    }`}
+                                  >
+                                    <div className="flex items-center gap-1.5 font-bold text-xs sm:text-sm tracking-tight">
+                                      {renderAppIcon(app.iconKey, "w-4 h-4")}
+                                      <span className="truncate max-w-[82px]">
+                                        {app.name}
+                                      </span>
+                                    </div>
+                                  </button>
+                                );
+                              })}
                             </div>
 
-                            <div className="text-right bg-black/45 backdrop-blur-md px-3.5 py-2 rounded-xl border border-white/10">
-                              <div className="text-2xl font-light tracking-wider text-amber-50">
-                                8:45 PM
+                            {/* @iampiny Bottom Left Utility Links (Artwork, Apps, Settings, webOS UI) */}
+                            <div className="hidden sm:flex flex-col gap-1 pt-2 text-[11px] text-zinc-300">
+                              <div className="flex items-center gap-2 px-2 py-1 rounded-md bg-white/10 text-white">
+                                <ImageIcon className="w-3.5 h-3.5" />
+                                <span>Artwork · Fall Harvest</span>
                               </div>
-                              <div className="text-[10px] text-orange-200/80">
-                                Oct 20 · 54°F Crisp Autumn Night
+                              <div className="flex items-center gap-2 px-2 py-0.5 text-zinc-400">
+                                <Grid className="w-3.5 h-3.5" />
+                                <span>Apps ({enabledApps.length})</span>
                               </div>
                             </div>
                           </div>
 
-                          {/* Center / Bottom Focused App Card or Launched App View */}
-                          {activeLaunchedApp ? (
-                            <div className="my-auto mx-auto w-full max-w-md rounded-2xl bg-black/80 backdrop-blur-xl border border-orange-400/50 p-5 text-center space-y-3 shadow-2xl">
-                              <div
-                                className="w-12 h-12 rounded-2xl mx-auto flex items-center justify-center text-white shadow-lg"
-                                style={{
-                                  backgroundColor: activeLaunchedApp.accentColor,
-                                }}
-                              >
-                                {renderAppIcon(activeLaunchedApp.iconKey)}
+                          {/* Center Area: Optional Autumn Lofi / Continue Watching Rows (from @iampiny frames 2-4) */}
+                          {config.launcherTheme.showContentShelves && (
+                            <div className="my-auto flex-1 px-6 space-y-3">
+                              <div className="text-xs font-medium text-zinc-200">
+                                Recommended for you · Autumn OLED Ambience
                               </div>
-                              <div>
-                                <p className="text-xs font-mono uppercase tracking-widest text-orange-300">
-                                  luna://com.webos.applicationManager/launch
-                                </p>
-                                <h3 className="text-lg font-semibold text-white mt-0.5">
-                                  Launching {activeLaunchedApp.name}...
-                                </h3>
-                                <p className="text-xs text-zinc-400 font-mono mt-0.5">
-                                  appId: &quot;{activeLaunchedApp.id}&quot;
-                                </p>
-                              </div>
-                              <Button
-                                size="sm"
-                                variant="outline"
-                                onClick={() => setActiveLaunchedApp(null)}
-                                className="border-zinc-700 bg-zinc-900 text-xs text-zinc-200"
-                              >
-                                Press HOME (Back to Sidebar)
-                              </Button>
-                            </div>
-                          ) : (
-                            focusedApp && (
-                              <div className="mt-auto max-w-md rounded-2xl bg-black/55 backdrop-blur-md border border-orange-400/25 p-4 flex items-center justify-between gap-4 shadow-xl">
-                                <div className="flex items-center gap-3.5">
+                              <div className="grid grid-cols-3 gap-3">
+                                {AUTUMN_AMBIENT_SHELF.map((card, i) => (
                                   <div
-                                    className="w-11 h-11 rounded-xl flex items-center justify-center text-white shadow-md shrink-0"
-                                    style={{
-                                      backgroundColor: focusedApp.accentColor,
-                                    }}
+                                    key={card.title}
+                                    className={`rounded-2xl p-3 bg-gradient-to-br ${
+                                      card.gradient
+                                    } border transition ${
+                                      i === 0
+                                        ? "border-white shadow-lg scale-[1.02]"
+                                        : "border-white/10 opacity-85"
+                                    }`}
                                   >
-                                    {renderAppIcon(focusedApp.iconKey)}
-                                  </div>
-                                  <div>
-                                    <div className="flex items-center gap-2">
-                                      <span className="text-sm font-semibold text-white">
-                                        {focusedApp.name}
-                                      </span>
-                                      <Badge
-                                        variant="outline"
-                                        className="text-[10px] border-orange-400/30 text-orange-200"
-                                      >
-                                        {focusedApp.category}
-                                      </Badge>
+                                    <div className="text-[9px] font-mono text-orange-200">
+                                      {card.badge}
                                     </div>
-                                    <p className="text-xs text-zinc-300 mt-0.5">
-                                      {focusedApp.subtitle}
-                                    </p>
-                                    <p className="text-[10px] font-mono text-zinc-400 mt-0.5">
-                                      ID: {focusedApp.id}
-                                    </p>
+                                    <div className="text-xs font-semibold text-white mt-4">
+                                      {card.title}
+                                    </div>
+                                    <div className="text-[10px] text-zinc-300 mt-0.5">
+                                      {card.channel}
+                                    </div>
                                   </div>
-                                </div>
-                                <Button
-                                  size="sm"
-                                  onClick={() => setActiveLaunchedApp(focusedApp)}
-                                  className="bg-orange-600 hover:bg-orange-500 text-white text-xs shrink-0"
-                                >
-                                  Launch
-                                </Button>
+                                ))}
                               </div>
-                            )
+                            </div>
                           )}
+
+                          {/* Right Edge: Top-Right Clock (0:16) + Vertical OLED Brightness Slider (@iampiny frames 5-7) */}
+                          <div className="flex flex-col items-end justify-between h-full">
+                            <div className="text-xl sm:text-2xl font-light tracking-wider text-white/90">
+                              0:16
+                            </div>
+
+                            <div className="flex items-center gap-2 my-auto">
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  syncConfig({
+                                    ...config,
+                                    launcherTheme: {
+                                      ...config.launcherTheme,
+                                      oledBrightness:
+                                        config.launcherTheme.oledBrightness >= 95
+                                          ? 65
+                                          : config.launcherTheme.oledBrightness + 10,
+                                    },
+                                  })
+                                }
+                                title="Adjust OLED Brightness"
+                                className="w-7 h-7 rounded-full bg-zinc-900/80 border border-white/15 flex items-center justify-center text-white/80 hover:text-white"
+                              >
+                                <Sun className="w-3.5 h-3.5" />
+                              </button>
+                              <div className="h-28 w-5 rounded-full bg-black/60 border border-white/15 flex flex-col items-center justify-between py-1.5">
+                                <Sun className="w-2.5 h-2.5 text-white/70" />
+                                <div className="relative w-0.5 flex-1 bg-white/25 my-1 rounded-full">
+                                  <div
+                                    className="w-2.5 h-2.5 rounded-full bg-white -left-1 absolute shadow"
+                                    style={{
+                                      bottom: `${config.launcherTheme.oledBrightness}%`,
+                                    }}
+                                  />
+                                </div>
+                                <Sun className="w-2 h-2 text-white/40" />
+                              </div>
+                            </div>
+
+                            <div className="text-[10px] text-zinc-400">
+                              Enter opens {focusedApp?.name}
+                            </div>
+                          </div>
                         </div>
-                      </div>
+                      )}
+
+                      {/* =================================================
+                         PARADIGM C: FROSTED GLASS SIDEBAR DOCK
+                         ================================================= */}
+                      {paradigm === "glass-dock" && (
+                        <div className="relative z-10 w-full h-full flex justify-between">
+                          <div className="w-64 h-full bg-black/65 backdrop-blur-xl border-r border-orange-500/20 p-3.5 flex flex-col justify-between">
+                            <div className="flex items-center justify-between px-2 pb-2 border-b border-white/10">
+                              <span className="text-xs font-semibold text-orange-100">
+                                Quick Apps
+                              </span>
+                              <span className="text-[10px] font-mono text-orange-300">
+                                HOME · 773
+                              </span>
+                            </div>
+                            <div className="my-2 flex-1 space-y-1 overflow-y-auto">
+                              {enabledApps.map((app, idx) => {
+                                const isSelected = idx === selectedSidebarIdx;
+                                return (
+                                  <button
+                                    key={app.id}
+                                    type="button"
+                                    onClick={() => setSelectedSidebarIdx(idx)}
+                                    className={`w-full flex items-center gap-2.5 px-2.5 py-1.5 rounded-xl text-left transition ${
+                                      isSelected
+                                        ? "bg-orange-500/25 border border-orange-400/50 text-white"
+                                        : "text-zinc-400 hover:bg-white/5"
+                                    }`}
+                                  >
+                                    <div
+                                      className="w-6 h-6 rounded-lg flex items-center justify-center text-white shrink-0"
+                                      style={{ backgroundColor: app.accentColor }}
+                                    >
+                                      {renderAppIcon(app.iconKey, "w-3.5 h-3.5")}
+                                    </div>
+                                    <span className="text-xs font-medium truncate">
+                                      {app.name}
+                                    </span>
+                                  </button>
+                                );
+                              })}
+                            </div>
+                            <div className="text-[10px] text-emerald-400 font-mono px-2">
+                              ACR/Ads Blocked: 28 hosts
+                            </div>
+                          </div>
+                        </div>
+                      )}
                     </div>
                   ) : previewCompareMode === "stock-debloated" ? (
-                    /* =========================================================
-                       MODE 2: DEBLOATED NATIVE BOTTOM BAR (home.xml OVERLAY)
-                       ========================================================= */
                     <div className="w-full h-full flex flex-col justify-between p-5 bg-black">
                       <div className="flex items-center justify-between text-xs text-zinc-500 font-mono">
                         <span>webOS 10.3.0 Flutter Home (home.xml Stripped Overlay)</span>
@@ -1034,9 +1395,6 @@ export default function G3StudioPage() {
                       </div>
                     </div>
                   ) : (
-                    /* =========================================================
-                       MODE 3: STOCK UNMODIFIED WEBOS 25 (WITH BLOAT & ADS)
-                       ========================================================= */
                     <div className="w-full h-full flex flex-col justify-between p-4 bg-zinc-950">
                       <div className="h-28 rounded-lg bg-gradient-to-r from-indigo-950 via-purple-950 to-rose-950 border border-rose-500/40 p-3 flex flex-col justify-between">
                         <div className="flex justify-between text-[10px] text-rose-200">
@@ -1066,11 +1424,11 @@ export default function G3StudioPage() {
                   )}
                 </div>
 
-                {/* Interactive D-Pad Remote Bar under the TV */}
+                {/* Simulated Remote Control Bar */}
                 <div className="mt-3 flex flex-wrap items-center justify-between gap-3 bg-zinc-950/90 border border-zinc-800 rounded-xl px-3.5 py-2.5">
                   <div className="flex items-center gap-2">
                     <span className="text-xs text-zinc-400 font-medium">
-                      Test Remote Control:
+                      Remote keys active:
                     </span>
                     <Button
                       size="sm"
@@ -1085,7 +1443,7 @@ export default function G3StudioPage() {
                         );
                       }}
                     >
-                      <ChevronUp className="w-3.5 h-3.5" /> Up
+                      <ChevronUp className="w-3.5 h-3.5" />
                     </Button>
                     <Button
                       size="sm"
@@ -1099,7 +1457,7 @@ export default function G3StudioPage() {
                         );
                       }}
                     >
-                      <ChevronDown className="w-3.5 h-3.5" /> Down
+                      <ChevronDown className="w-3.5 h-3.5" />
                     </Button>
                     <Button
                       size="sm"
@@ -1108,7 +1466,7 @@ export default function G3StudioPage() {
                         if (focusedApp) setActiveLaunchedApp(focusedApp);
                       }}
                     >
-                      OK / Launch
+                      OK
                     </Button>
                     <Button
                       size="sm"
@@ -1119,20 +1477,20 @@ export default function G3StudioPage() {
                         setActiveLaunchedApp(null);
                       }}
                     >
-                      HOME (773)
+                      Back
                     </Button>
                   </div>
 
                   <div className="text-xs text-zinc-400">
                     {saving ? (
                       <span className="text-orange-400 font-mono">
-                        Syncing payload...
+                        Rebuilding debloat_home.sh & slopbro_packed.py...
                       </span>
                     ) : (
                       <span>
-                        Focused:{" "}
-                        <strong className="text-orange-300">
-                          {focusedApp?.name || "None"}
+                        Focus:{" "}
+                        <strong className="text-orange-300 font-mono">
+                          home.app.{focusedApp?.name.toLowerCase()}
                         </strong>
                       </span>
                     )}
@@ -1141,92 +1499,95 @@ export default function G3StudioPage() {
               </CardContent>
             </Card>
 
-            {/* Inspiration Video Dropzone + Phone Remote Session Control Helper */}
-            <Card className="bg-zinc-900/80 border-zinc-800">
-              <CardHeader className="pb-3 border-b border-zinc-800/80">
-                <CardTitle className="text-base text-white flex items-center gap-2">
-                  <Smartphone className="w-4 h-4 text-orange-400" />
-                  Phone Inspiration Video Upload & Side-by-Side Reference
-                </CardTitle>
-                <CardDescription className="text-xs text-zinc-400">
-                  Attach your inspiration video directly in the Cursor chat from your phone, or drop it right here to compare side-by-side with the TV simulator above.
-                </CardDescription>
-              </CardHeader>
-              <CardContent className="p-4 space-y-4">
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <label className="cursor-pointer rounded-xl border-2 border-dashed border-zinc-700 hover:border-orange-500/60 bg-zinc-950/70 p-4 flex flex-col items-center justify-center text-center transition">
-                    <Upload className="w-6 h-6 text-orange-400 mb-2" />
-                    <span className="text-xs font-medium text-white">
-                      Drop or Select Inspiration Video / Image (.mp4, .mov, .webm, .png)
-                    </span>
-                    <span className="text-[11px] text-zinc-400 mt-1">
-                      {inspoVideoName
-                        ? `Loaded: ${inspoVideoName}`
-                        : "Test locally in the studio or attach in Cursor chat so the agent can inspect every frame"}
-                    </span>
-                    <input
-                      type="file"
-                      accept="video/*,image/*"
-                      onChange={handleInspoUpload}
-                      className="hidden"
-                    />
-                  </label>
-
-                  <div className="rounded-xl bg-zinc-950 border border-zinc-800 p-3.5 text-xs space-y-1.5">
-                    <div className="font-semibold text-orange-300 flex items-center gap-1.5">
-                      <Smartphone className="w-3.5 h-3.5" />
-                      Uploading from Your Phone in Cursor
-                    </div>
-                    <p className="text-zinc-400 leading-relaxed">
-                      1. Open <strong className="text-zinc-200">cursor.com/agents</strong> on your phone (or the Cursor mobile app) and open this session.
-                    </p>
-                    <p className="text-zinc-400 leading-relaxed">
-                      2. Tap the <strong className="text-zinc-200">+ / attachment</strong> icon in the message box to upload your inspiration video directly from your camera roll—I can analyze the video frames and match the exact sidebar animation, spacing, and transitions!
-                    </p>
-                  </div>
-                </div>
-
-                {inspoVideoUrl && (
-                  <div className="rounded-xl overflow-hidden border border-orange-500/30 bg-black p-2">
-                    <p className="text-xs font-mono text-orange-300 mb-2 px-1">
-                      Reference Inspiration Preview ({inspoVideoName})
-                    </p>
-                    <video
-                      src={inspoVideoUrl}
-                      controls
-                      loop
-                      muted
-                      className="w-full max-h-64 rounded-lg object-contain bg-black"
-                    />
-                  </div>
-                )}
-              </CardContent>
-            </Card>
-
-            {/* GitHub Repo Push & Plug-and-Play Community Installer Card */}
-            <Card className="bg-zinc-900/80 border-zinc-800">
+            {/* STEP-BY-STEP DIRECTIONS TO ROOT & DEPLOY ON YOUR LAN */}
+            <Card className="bg-zinc-900/80 border-emerald-500/30 shadow-xl">
               <CardHeader className="pb-3 border-b border-zinc-800/80">
                 <CardTitle className="text-base text-white flex items-center gap-2">
                   <GitBranch className="w-4 h-4 text-emerald-400" />
-                  Publish to{" "}
-                  <code className="text-emerald-300">
-                    github.com/{config.githubOwner}/{config.repoName}
-                  </code>{" "}
-                  & Plug-and-Play CLI
+                  Step-by-Step Directions: Root & Deploy on Your LG OLED65G3PUA (192.168.97.141)
                 </CardTitle>
                 <CardDescription className="text-xs text-zinc-400">
-                  One-click repository creation or terminal push so anyone can clone and customize their own LG webOS TV
+                  Run these exact commands from any laptop/computer on your home Wi-Fi (`192.168.97.x`)
                 </CardDescription>
               </CardHeader>
-              <CardContent className="p-4 space-y-3">
-                <Tabs defaultValue="github">
-                  <TabsList className="bg-zinc-950 border border-zinc-800 mb-3">
-                    <TabsTrigger value="github" className="text-xs">
-                      Push to GitHub ({config.repoName})
-                    </TabsTrigger>
-                    <TabsTrigger value="plugplay" className="text-xs">
-                      Plug & Play Run
-                    </TabsTrigger>
+              <CardContent className="p-4 space-y-4">
+                {/* Step 1: Publish to GitHub */}
+                <div className="rounded-lg bg-zinc-950 border border-zinc-800 p-3.5 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-semibold text-emerald-300">
+                      Step 1 — Publish Repository to GitHub (`github.com/james-lopez/lgOS-getSlopped`)
+                    </span>
+                  </div>
+                  <p className="text-xs text-zinc-400 leading-relaxed">
+                    Click the <strong className="text-white">Create repo</strong> pill at the top of your Cursor agent view and name it{" "}
+                    <code className="text-orange-300">lgOS-getSlopped</code>. Every commit on <code className="text-zinc-200">main</code> is already staged and pushed here, so clicking that pill immediately creates your GitHub repository.
+                  </p>
+                </div>
+
+                {/* Step 2: Clone & Run SlopBro over Wi-Fi */}
+                <div className="rounded-lg bg-zinc-950 border border-orange-500/30 p-3.5 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-semibold text-orange-300">
+                      Step 2 — Run the Root + Custom Launcher Installer on Your Laptop
+                    </span>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="h-7 text-xs text-zinc-300 hover:text-white gap-1.5"
+                      onClick={() =>
+                        copyText(
+                          "runlan",
+                          `git clone https://github.com/${config.githubOwner}/${config.repoName}.git\ncd ${config.repoName}\npython3 -m pip install websockets\npython3 slopbro.py --debug --webos-version 10 ${config.tvIp}`
+                        )
+                      }
+                    >
+                      {copiedKey === "runlan" ? (
+                        <Check className="w-3.5 h-3.5 text-emerald-400" />
+                      ) : (
+                        <Copy className="w-3.5 h-3.5" />
+                      )}
+                      Copy Commands
+                    </Button>
+                  </div>
+                  <pre className="text-xs font-mono text-orange-200 bg-black p-3 rounded border border-zinc-800 overflow-x-auto">
+                    {`git clone https://github.com/${config.githubOwner}/${config.repoName}.git
+cd ${config.repoName}
+python3 -m pip install websockets
+python3 slopbro.py --debug --webos-version 10 ${config.tvIp}`}
+                  </pre>
+                  <p className="text-[11px] text-zinc-400">
+                    When prompted on your LG G3 screen, click <strong className="text-white">Accept / Allow</strong> on the TV remote. SlopBro will root the TV, install Homebrew Channel, deploy your <code className="text-zinc-200">tld.slopbro.g3mod</code> custom launcher + stripped <code className="text-zinc-200">home.xml</code>, block all 28 LG ad/ACR domains, and bind your Magic Remote <strong className="text-white">HOME (773)</strong> button.
+                  </p>
+                </div>
+
+                {/* Step 3: Revert / Safety */}
+                <div className="rounded-lg bg-zinc-950 border border-zinc-800 p-3 space-y-1.5">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-medium text-zinc-300">
+                      Optional — Instant Revert to Stock webOS 25 Anytime
+                    </span>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="h-6 text-xs text-zinc-400 hover:text-white gap-1"
+                      onClick={() =>
+                        copyText(
+                          "revertcmd",
+                          `ssh root@${config.tvIp} "/media/developer/apps/usr/palm/applications/tld.slopbro.g3mod/apply.sh --revert"`
+                        )
+                      }
+                    >
+                      {copiedKey === "revertcmd" ? "Copied!" : "Copy Revert"}
+                    </Button>
+                  </div>
+                  <pre className="text-[11px] font-mono text-zinc-400 bg-black p-2 rounded border border-zinc-800 overflow-x-auto">
+                    {`ssh root@${config.tvIp} "/media/developer/apps/usr/palm/applications/tld.slopbro.g3mod/apply.sh --revert"`}
+                  </pre>
+                </div>
+
+                {/* Generated Files Inspector */}
+                <Tabs defaultValue="debloatsh">
+                  <TabsList className="bg-zinc-950 border border-zinc-800 mb-2">
                     <TabsTrigger value="debloatsh" className="text-xs">
                       debloat_home.sh
                     </TabsTrigger>
@@ -1236,150 +1597,45 @@ export default function G3StudioPage() {
                     <TabsTrigger value="keybinds" className="text-xs">
                       keybinds.json
                     </TabsTrigger>
+                    <TabsTrigger value="log" className="text-xs">
+                      Probe Output
+                    </TabsTrigger>
                   </TabsList>
-
-                  <TabsContent value="github" className="space-y-3">
-                    <div className="rounded-lg bg-zinc-950 border border-emerald-500/30 p-3 space-y-2">
-                      <p className="text-xs font-semibold text-emerald-300">
-                        Method A (Easiest in Cursor): Click the &quot;Create repo&quot; Pill
-                      </p>
-                      <p className="text-xs text-zinc-400">
-                        Because this session started as a new project without a linked GitHub repository, click the{" "}
-                        <strong className="text-white">Create repo</strong> pill at the top of your Cursor agent view and name it{" "}
-                        <code className="text-orange-300">lgOS-getSlopped</code> under{" "}
-                        <code className="text-orange-300">james-lopez</code>. All commits on <code className="text-zinc-200">main</code> will immediately publish there.
-                      </p>
-                    </div>
-
-                    <div className="rounded-lg bg-zinc-950 border border-zinc-800 p-3 space-y-2">
-                      <div className="flex items-center justify-between">
-                        <span className="text-xs font-medium text-zinc-300">
-                          Method B: Push Directly via Git Remote
-                        </span>
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          className="h-7 text-xs text-zinc-400 hover:text-white gap-1.5"
-                          onClick={() =>
-                            copyText(
-                              "ghpush",
-                              `git remote add github https://github.com/${config.githubOwner}/${config.repoName}.git\ngit push -u github main`
-                            )
-                          }
-                        >
-                          {copiedKey === "ghpush" ? (
-                            <Check className="w-3.5 h-3.5 text-emerald-400" />
-                          ) : (
-                            <Copy className="w-3.5 h-3.5" />
-                          )}
-                          Copy Commands
-                        </Button>
-                      </div>
-                      <pre className="text-xs font-mono text-emerald-400 bg-black/60 p-2.5 rounded border border-zinc-800/80 overflow-x-auto">
-                        {`git remote add github https://github.com/${config.githubOwner}/${config.repoName}.git\ngit push -u github main`}
-                      </pre>
-                    </div>
-                  </TabsContent>
-
-                  <TabsContent value="plugplay" className="space-y-3">
-                    <div className="rounded-lg bg-zinc-950 border border-zinc-800 p-3 space-y-2">
-                      <div className="flex items-center justify-between">
-                        <span className="text-xs font-medium text-zinc-300">
-                          Plug-and-Play Single Command (For You or Any Community User)
-                        </span>
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          className="h-7 text-xs text-zinc-400 hover:text-white gap-1.5"
-                          onClick={() =>
-                            copyText(
-                              "cmd1",
-                              `git clone https://github.com/${config.githubOwner}/${config.repoName}.git\ncd ${config.repoName}\npython3 slopbro.py --debug --webos-version 10 ${config.tvIp}`
-                            )
-                          }
-                        >
-                          {copiedKey === "cmd1" ? (
-                            <Check className="w-3.5 h-3.5 text-emerald-400" />
-                          ) : (
-                            <Copy className="w-3.5 h-3.5" />
-                          )}
-                          Copy
-                        </Button>
-                      </div>
-                      <pre className="text-xs font-mono text-orange-300 bg-black/60 p-2.5 rounded border border-zinc-800/80 overflow-x-auto">
-                        {`git clone https://github.com/${config.githubOwner}/${config.repoName}.git\ncd ${config.repoName}\npython3 slopbro.py --debug --webos-version 10 ${config.tvIp}`}
-                      </pre>
-                    </div>
-
-                    <div className="rounded-lg bg-black border border-zinc-800 p-3">
-                      <pre className="text-xs font-mono text-zinc-300 whitespace-pre-wrap max-h-40 overflow-y-auto">
-                        {terminalLog}
-                      </pre>
-                    </div>
-                  </TabsContent>
-
                   <TabsContent value="debloatsh">
-                    <div className="relative">
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        className="absolute right-2 top-2 h-7 text-xs bg-zinc-900 border-zinc-700"
-                        onClick={() => copyText("sh", debloatScript)}
-                      >
-                        {copiedKey === "sh" ? "Copied!" : "Copy Script"}
-                      </Button>
-                      <pre className="text-xs font-mono text-cyan-300 bg-black p-4 rounded-lg border border-zinc-800 overflow-x-auto max-h-72">
-                        {debloatScript}
-                      </pre>
-                    </div>
+                    <pre className="text-xs font-mono text-cyan-300 bg-black p-3 rounded-lg border border-zinc-800 overflow-x-auto max-h-56">
+                      {debloatScript}
+                    </pre>
                   </TabsContent>
-
                   <TabsContent value="homexml">
-                    <div className="relative">
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        className="absolute right-2 top-2 h-7 text-xs bg-zinc-900 border-zinc-700"
-                        onClick={() => copyText("xml", generatedXml)}
-                      >
-                        {copiedKey === "xml" ? "Copied!" : "Copy XML"}
-                      </Button>
-                      <pre className="text-xs font-mono text-emerald-300 bg-black p-4 rounded-lg border border-zinc-800 overflow-x-auto max-h-72">
-                        {generatedXml}
-                      </pre>
-                    </div>
+                    <pre className="text-xs font-mono text-emerald-300 bg-black p-3 rounded-lg border border-zinc-800 overflow-x-auto max-h-56">
+                      {generatedXml}
+                    </pre>
                   </TabsContent>
-
                   <TabsContent value="keybinds">
-                    <div className="relative">
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        className="absolute right-2 top-2 h-7 text-xs bg-zinc-900 border-zinc-700"
-                        onClick={() => copyText("kb", generatedKeybinds)}
-                      >
-                        {copiedKey === "kb" ? "Copied!" : "Copy JSON"}
-                      </Button>
-                      <pre className="text-xs font-mono text-amber-300 bg-black p-4 rounded-lg border border-zinc-800 overflow-x-auto max-h-72">
-                        {generatedKeybinds}
-                      </pre>
-                    </div>
+                    <pre className="text-xs font-mono text-amber-300 bg-black p-3 rounded-lg border border-zinc-800 overflow-x-auto max-h-56">
+                      {generatedKeybinds}
+                    </pre>
+                  </TabsContent>
+                  <TabsContent value="log">
+                    <pre className="text-xs font-mono text-zinc-300 bg-black p-3 rounded-lg border border-zinc-800 whitespace-pre-wrap max-h-56 overflow-y-auto">
+                      {terminalLog}
+                    </pre>
                   </TabsContent>
                 </Tabs>
               </CardContent>
             </Card>
           </div>
 
-          {/* Right 5 Columns: Sidebar Apps, Seasonal Theme, Privacy & Remote Customizer */}
+          {/* Right 5 Columns: Two-Zone Home App Editor, Theme, Privacy & Remote Customizer */}
           <div className="lg:col-span-5 space-y-6">
             <Card className="bg-zinc-900/80 border-zinc-800">
               <CardHeader className="pb-3 border-b border-zinc-800/80">
-                <CardTitle className="text-base text-white">
-                  Sidebar, Seasonal Theme & OS Customizer
+                <CardTitle className="text-base text-white flex items-center gap-2">
+                  <Layers className="w-4 h-4 text-orange-400" />
+                  B · Home Editor & webOS 25 Customizer
                 </CardTitle>
                 <CardDescription className="text-xs text-zinc-400">
-                  Play with the sidebar apps, Fall/Pumpkin turn-on visuals, and privacy shields before running on{" "}
-                  <code className="text-zinc-200">{config.tvIp}</code>
+                  Two-zone app editor (&quot;On Home&quot; vs &quot;Recently Removed&quot;), seasonal themes, and privacy shields
                 </CardDescription>
               </CardHeader>
 
@@ -1387,10 +1643,10 @@ export default function G3StudioPage() {
                 <Tabs defaultValue="sidebar">
                   <TabsList className="grid grid-cols-5 bg-zinc-950 border border-zinc-800 mb-4">
                     <TabsTrigger value="sidebar" className="text-xs">
-                      Sidebar
+                      Apps
                     </TabsTrigger>
                     <TabsTrigger value="season" className="text-xs">
-                      Fall BG
+                      Theme
                     </TabsTrigger>
                     <TabsTrigger value="home" className="text-xs">
                       XML
@@ -1403,56 +1659,16 @@ export default function G3StudioPage() {
                     </TabsTrigger>
                   </TabsList>
 
-                  {/* TAB 1: SIDEBAR APPS & NAVIGATION */}
+                  {/* TAB 1: TWO-ZONE APP EDITOR (CleanFrame B - Home editor in Settings) */}
                   <TabsContent value="sidebar" className="space-y-3">
                     <div className="flex items-center justify-between">
                       <div>
                         <p className="text-xs font-semibold uppercase tracking-wider text-orange-300">
-                          Major Apps in Sidebar Rail
+                          On Home ({enabledApps.length}) &amp; Available Apps
                         </p>
                         <p className="text-[11px] text-zinc-400">
-                          Toggle or reorder apps in the vertical sidebar
+                          Reorder with arrows or toggle apps on/off Home
                         </p>
-                      </div>
-                      <div className="flex items-center gap-1 bg-zinc-950 p-1 rounded border border-zinc-800">
-                        <button
-                          type="button"
-                          onClick={() =>
-                            syncConfig({
-                              ...config,
-                              launcherTheme: {
-                                ...config.launcherTheme,
-                                sidebarPosition: "left",
-                              },
-                            })
-                          }
-                          className={`px-2 py-0.5 rounded text-[11px] ${
-                            config.launcherTheme.sidebarPosition === "left"
-                              ? "bg-orange-600 text-white"
-                              : "text-zinc-400"
-                          }`}
-                        >
-                          Left Dock
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() =>
-                            syncConfig({
-                              ...config,
-                              launcherTheme: {
-                                ...config.launcherTheme,
-                                sidebarPosition: "right",
-                              },
-                            })
-                          }
-                          className={`px-2 py-0.5 rounded text-[11px] ${
-                            config.launcherTheme.sidebarPosition === "right"
-                              ? "bg-orange-600 text-white"
-                              : "text-zinc-400"
-                          }`}
-                        >
-                          Right Dock
-                        </button>
                       </div>
                     </div>
 
@@ -1464,14 +1680,17 @@ export default function G3StudioPage() {
                         >
                           <div className="flex items-center gap-2.5 min-w-0">
                             <div
-                              className="w-7 h-7 rounded-lg flex items-center justify-center text-white shrink-0"
-                              style={{ backgroundColor: app.accentColor }}
+                              className="w-7 h-7 rounded-lg flex items-center justify-center shrink-0 border border-white/10"
+                              style={{
+                                backgroundColor: app.tileBgColor || app.accentColor,
+                                color: app.tileTextColor || "#fff",
+                              }}
                             >
-                              {renderAppIcon(app.iconKey)}
+                              {renderAppIcon(app.iconKey, "w-3.5 h-3.5")}
                             </div>
                             <div className="min-w-0">
                               <p className="text-xs font-medium text-white truncate">
-                                {app.name}
+                                {index + 1}. {app.name}
                               </p>
                               <p className="text-[10px] text-zinc-500 font-mono truncate">
                                 {app.id}
@@ -1513,54 +1732,33 @@ export default function G3StudioPage() {
                     </div>
                   </TabsContent>
 
-                  {/* TAB 2: SEASONAL FALL & PUMPKIN BACKGROUND */}
+                  {/* TAB 2: SEASONAL & PARADIGM THEME */}
                   <TabsContent value="season" className="space-y-4">
                     <div className="space-y-2">
                       <Label className="text-xs text-zinc-300 uppercase tracking-wider">
-                        Turn-On Seasonal Backdrop
+                        Focus Treatment (CleanFrame)
                       </Label>
-                      <div className="grid grid-cols-1 gap-2">
-                        {[
-                          {
-                            id: "fall-pumpkin" as const,
-                            title: "Autumn Harvest & Glowing Pumpkins (Active)",
-                            desc: "Warm harvest moon, carved jack-o'-lantern glow & drifting autumn leaves on OLED dark canvas",
-                          },
-                          {
-                            id: "winter-aurora" as const,
-                            title: "Winter Midnight Aurora",
-                            desc: "Deep arctic blue & emerald aurora borealis gradient",
-                          },
-                          {
-                            id: "midnight-oled" as const,
-                            title: "Pure Pitch-Black OLED (0% APL)",
-                            desc: "Complete pixel-off background with floating sidebar rail",
-                          },
-                        ].map((preset) => (
+                      <div className="grid grid-cols-3 gap-2">
+                        {(["type", "glass", "glow"] as const).map((ft) => (
                           <button
-                            key={preset.id}
+                            key={ft}
                             type="button"
                             onClick={() =>
                               syncConfig({
                                 ...config,
                                 launcherTheme: {
                                   ...config.launcherTheme,
-                                  activeSeason: preset.id,
+                                  focusTreatment: ft,
                                 },
                               })
                             }
-                            className={`p-3 rounded-lg border text-left transition ${
-                              config.launcherTheme.activeSeason === preset.id
-                                ? "bg-orange-950/40 border-orange-500/60 text-white"
-                                : "bg-zinc-950 border-zinc-800 text-zinc-400 hover:text-zinc-200"
+                            className={`py-1.5 px-2 rounded border text-xs capitalize ${
+                              config.launcherTheme.focusTreatment === ft
+                                ? "bg-orange-600 border-orange-500 text-white"
+                                : "bg-zinc-950 border-zinc-800 text-zinc-400"
                             }`}
                           >
-                            <div className="text-xs font-semibold text-orange-200">
-                              {preset.title}
-                            </div>
-                            <div className="text-[11px] text-zinc-400 mt-0.5">
-                              {preset.desc}
-                            </div>
+                            {ft}
                           </button>
                         ))}
                       </div>
@@ -1585,25 +1783,6 @@ export default function G3StudioPage() {
                       />
                     </div>
 
-                    <div className="space-y-2">
-                      <Label className="text-xs text-zinc-300">
-                        Subheading / Ambience Caption
-                      </Label>
-                      <Input
-                        value={config.launcherTheme.greetingSubtitle}
-                        onChange={(e) =>
-                          syncConfig({
-                            ...config,
-                            launcherTheme: {
-                              ...config.launcherTheme,
-                              greetingSubtitle: e.target.value,
-                            },
-                          })
-                        }
-                        className="bg-zinc-950 border-zinc-800 text-xs text-white"
-                      />
-                    </div>
-
                     <div className="flex items-center justify-between pt-1">
                       <div>
                         <p className="text-sm font-medium text-white">
@@ -1621,31 +1800,6 @@ export default function G3StudioPage() {
                             launcherTheme: {
                               ...config.launcherTheme,
                               ambientParticles: v,
-                            },
-                          })
-                        }
-                      />
-                    </div>
-
-                    <div className="flex items-center justify-between">
-                      <div>
-                        <p className="text-sm font-medium text-white">
-                          Frosted Glass Sidebar Backdrop
-                        </p>
-                        <p className="text-xs text-zinc-400">
-                          Translucent blur over the pumpkin harvest scene
-                        </p>
-                      </div>
-                      <Switch
-                        checked={
-                          config.launcherTheme.sidebarStyle === "frosted-glass"
-                        }
-                        onCheckedChange={(v) =>
-                          syncConfig({
-                            ...config,
-                            launcherTheme: {
-                              ...config.launcherTheme,
-                              sidebarStyle: v ? "frosted-glass" : "pure-oled",
                             },
                           })
                         }
@@ -1707,7 +1861,7 @@ export default function G3StudioPage() {
                           Hide Top-Right Global Navigation Icons
                         </p>
                         <p className="text-xs text-zinc-400">
-                          Sets <code>globalline</code> to <code>0x0</code> after <code>herobanner</code>
+                          Sets <code>globalline</code> to <code>0x0</code>
                         </p>
                       </div>
                       <Switch
@@ -1718,29 +1872,6 @@ export default function G3StudioPage() {
                             homeLayout: {
                               ...config.homeLayout,
                               hideGlobalLine: v,
-                            },
-                          })
-                        }
-                      />
-                    </div>
-
-                    <div className="flex items-center justify-between">
-                      <div>
-                        <p className="text-sm font-medium text-white">
-                          Strip Hero Promo Text (i18n Override)
-                        </p>
-                        <p className="text-xs text-zinc-400">
-                          Blanks &quot;Start a new experience with webOS&quot;
-                        </p>
-                      </div>
-                      <Switch
-                        checked={config.homeLayout.blankPromoText}
-                        onCheckedChange={(v) =>
-                          syncConfig({
-                            ...config,
-                            homeLayout: {
-                              ...config.homeLayout,
-                              blankPromoText: v,
                             },
                           })
                         }
@@ -1797,30 +1928,6 @@ export default function G3StudioPage() {
                     <div className="flex items-center justify-between">
                       <div>
                         <p className="text-sm font-medium text-white">
-                          Kill AdOverlay & RDXD Daemons in RAM
-                        </p>
-                        <p className="text-xs text-zinc-400">
-                          Terminates <code>adoverlay</code>, <code>acroverlay</code>, and <code>rdxd</code>
-                        </p>
-                      </div>
-                      <Switch
-                        checked={config.privacy.killAdOverlays}
-                        onCheckedChange={(v) =>
-                          syncConfig({
-                            ...config,
-                            privacy: {
-                              ...config.privacy,
-                              killAdOverlays: v,
-                              killRdxdTelemetry: v,
-                            },
-                          })
-                        }
-                      />
-                    </div>
-
-                    <div className="flex items-center justify-between">
-                      <div>
-                        <p className="text-sm font-medium text-white">
                           Block LG OTA Firmware Updates
                         </p>
                         <p className="text-xs text-zinc-400">
@@ -1850,7 +1957,7 @@ export default function G3StudioPage() {
                           Syspoke lginputhook v1.5.0 (webOS 25)
                         </p>
                         <p className="text-[11px] text-zinc-400">
-                          Remaps physical sponsored remote buttons via uinput_code
+                          Hijacks HOME (773) &amp; remaps sponsored buttons
                         </p>
                       </div>
                       <Switch
@@ -1942,6 +2049,52 @@ export default function G3StudioPage() {
                     </div>
                   </TabsContent>
                 </Tabs>
+              </CardContent>
+            </Card>
+
+            {/* Loaded Inspiration Assets Card */}
+            <Card className="bg-zinc-900/80 border-zinc-800">
+              <CardHeader className="pb-2 border-b border-zinc-800/80">
+                <CardTitle className="text-sm text-white flex items-center gap-2">
+                  <Smartphone className="w-4 h-4 text-orange-400" />
+                  Synced Inspiration Reference (@iampiny + CleanFrame)
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="p-3.5 space-y-3 text-xs text-zinc-400">
+                <p>
+                  Both inspirations are now built directly into your launcher and packaged into <code className="text-zinc-200">tld.slopbro.g3mod</code>:
+                </p>
+                <ul className="list-disc pl-4 space-y-1 text-[11px]">
+                  <li>
+                    <strong className="text-white">CleanFrame Photo List</strong>: Top-left <code className="text-zinc-200">9:41</code> clock, large monochrome icon + bold sans-serif typography list on the left third, top-right quick icons, and two-zone Home editor.
+                  </li>
+                  <li>
+                    <strong className="text-white">@iampiny Video UI</strong>: High-contrast brand squircle tiles (YouTube, Netflix, Plex, Spotify, GeForce/Moonlight), top-right <code className="text-zinc-200">0:16</code> clock, right-edge OLED brightness slider, and optional autumn lofi content shelf.
+                  </li>
+                </ul>
+                <label className="cursor-pointer rounded-lg border border-dashed border-zinc-700 hover:border-orange-500/60 bg-zinc-950 p-2.5 flex items-center justify-center gap-2 text-center transition">
+                  <Upload className="w-4 h-4 text-orange-400" />
+                  <span className="text-[11px] text-zinc-300">
+                    {inspoVideoName
+                      ? `Loaded: ${inspoVideoName}`
+                      : "Drop additional video/image to compare"}
+                  </span>
+                  <input
+                    type="file"
+                    accept="video/*,image/*"
+                    onChange={handleInspoUpload}
+                    className="hidden"
+                  />
+                </label>
+                {inspoVideoUrl && (
+                  <video
+                    src={inspoVideoUrl}
+                    controls
+                    loop
+                    muted
+                    className="w-full max-h-48 rounded-lg object-contain bg-black"
+                  />
+                )}
               </CardContent>
             </Card>
           </div>

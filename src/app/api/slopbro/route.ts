@@ -9,6 +9,8 @@ export interface SidebarAppItem {
   subtitle: string;
   category: "Streaming" | "Media Server" | "Gaming & Inputs" | "System";
   accentColor: string;
+  tileBgColor: string;
+  tileTextColor: string;
   iconKey: string;
   enabled: boolean;
 }
@@ -24,13 +26,23 @@ export interface G3ModConfig {
   curlInsecure: boolean;
   fakeServicePath: string;
   launcherTheme: {
-    activeSeason: "fall-pumpkin" | "winter-aurora" | "midnight-oled" | "custom";
+    uiParadigm: "cleanframe-list" | "piny-tiles" | "glass-dock";
+    focusTreatment: "type" | "glass" | "glow";
+    materialStyle: "clear-tint" | "frost" | "soft-oled";
+    activeSeason:
+      | "fall-pumpkin"
+      | "misty-autumn-coast"
+      | "moody-forest-oled"
+      | "winter-aurora"
+      | "midnight-oled";
     greetingTitle: string;
     greetingSubtitle: string;
     ambientParticles: boolean;
     turnOnAnimation: boolean;
     sidebarPosition: "left" | "right";
     sidebarStyle: "frosted-glass" | "pure-oled";
+    showContentShelves: boolean;
+    oledBrightness: number;
     autoHideSidebarSec: number;
     customWallpaperUrl: string;
   };
@@ -65,6 +77,7 @@ export interface G3ModConfig {
   };
   keybinds: {
     installInputHook: boolean;
+    hijackHomeButton: boolean;
     mappings: Record<
       string,
       {
@@ -80,10 +93,12 @@ export interface G3ModConfig {
 export const DEFAULT_SIDEBAR_APPS: SidebarAppItem[] = [
   {
     id: "org.webosbrew.youtube.leanback.v4",
-    name: "YouTube AdFree",
-    subtitle: "4K HDR · SponsorBlock · 0 Ads",
+    name: "YouTube",
+    subtitle: "AdFree 4K HDR · SponsorBlock",
     category: "Streaming",
-    accentColor: "#f97316",
+    accentColor: "#ef4444",
+    tileBgColor: "#ffffff",
+    tileTextColor: "#111111",
     iconKey: "youtube",
     enabled: true,
   },
@@ -92,17 +107,10 @@ export const DEFAULT_SIDEBAR_APPS: SidebarAppItem[] = [
     name: "Netflix",
     subtitle: "Dolby Vision · Atmos",
     category: "Streaming",
-    accentColor: "#ef4444",
+    accentColor: "#e50914",
+    tileBgColor: "#ffffff",
+    tileTextColor: "#e50914",
     iconKey: "netflix",
-    enabled: true,
-  },
-  {
-    id: "org.jellyfin.webos",
-    name: "Jellyfin",
-    subtitle: "Local Direct Play · 192.168.97.x",
-    category: "Media Server",
-    accentColor: "#a855f7",
-    iconKey: "jellyfin",
     enabled: true,
   },
   {
@@ -110,8 +118,21 @@ export const DEFAULT_SIDEBAR_APPS: SidebarAppItem[] = [
     name: "Plex",
     subtitle: "Cinema Library · TrueHD",
     category: "Media Server",
-    accentColor: "#f59e0b",
+    accentColor: "#e5a00d",
+    tileBgColor: "#1f2326",
+    tileTextColor: "#ffffff",
     iconKey: "plex",
+    enabled: true,
+  },
+  {
+    id: "org.jellyfin.webos",
+    name: "Jellyfin",
+    subtitle: "Direct Play · 192.168.97.x",
+    category: "Media Server",
+    accentColor: "#a855f7",
+    tileBgColor: "#1b1429",
+    tileTextColor: "#ffffff",
+    iconKey: "jellyfin",
     enabled: true,
   },
   {
@@ -119,17 +140,10 @@ export const DEFAULT_SIDEBAR_APPS: SidebarAppItem[] = [
     name: "Disney+",
     subtitle: "IMAX Enhanced · 4K",
     category: "Streaming",
-    accentColor: "#3b82f6",
+    accentColor: "#38bdf8",
+    tileBgColor: "#061539",
+    tileTextColor: "#ffffff",
     iconKey: "disney",
-    enabled: true,
-  },
-  {
-    id: "amazon",
-    name: "Prime Video",
-    subtitle: "UHD HDR10+",
-    category: "Streaming",
-    accentColor: "#06b6d4",
-    iconKey: "prime",
     enabled: true,
   },
   {
@@ -137,36 +151,66 @@ export const DEFAULT_SIDEBAR_APPS: SidebarAppItem[] = [
     name: "Spotify",
     subtitle: "Lossless eARC Audio",
     category: "Streaming",
-    accentColor: "#22c55e",
+    accentColor: "#1ed760",
+    tileBgColor: "#1ed760",
+    tileTextColor: "#000000",
     iconKey: "spotify",
     enabled: true,
   },
   {
-    id: "com.webos.app.hdmi1",
-    name: "HDMI 1 · PlayStation 5",
-    subtitle: "4K 120Hz · VRR · ALLM",
-    category: "Gaming & Inputs",
-    accentColor: "#6366f1",
-    iconKey: "gamepad",
-    enabled: true,
-  },
-  {
     id: "com.limelight.webos",
-    name: "Moonlight GameStream",
-    subtitle: "PC 4K 120fps · 0.8ms Decode",
+    name: "GeForce / Moonlight",
+    subtitle: "PC 4K 120Hz · 0.8ms",
     category: "Gaming & Inputs",
-    accentColor: "#eab308",
+    accentColor: "#76b900",
+    tileBgColor: "#1a1c1e",
+    tileTextColor: "#ffffff",
     iconKey: "moonlight",
     enabled: true,
   },
   {
-    id: "org.webosbrew.hbchannel",
-    name: "Homebrew Channel",
-    subtitle: "Root Services & System Mods",
-    category: "System",
-    accentColor: "#ec4899",
-    iconKey: "homebrew",
+    id: "com.apple.appletv",
+    name: "Apple TV",
+    subtitle: "4K Dolby Vision",
+    category: "Streaming",
+    accentColor: "#e4e4e7",
+    tileBgColor: "#18181b",
+    tileTextColor: "#ffffff",
+    iconKey: "appletv",
     enabled: true,
+  },
+  {
+    id: "amazon",
+    name: "Prime Video",
+    subtitle: "UHD HDR10+",
+    category: "Streaming",
+    accentColor: "#00a8e1",
+    tileBgColor: "#0f172a",
+    tileTextColor: "#ffffff",
+    iconKey: "prime",
+    enabled: true,
+  },
+  {
+    id: "com.webos.app.hdmi1",
+    name: "HDMI 1 · PS5",
+    subtitle: "4K 120Hz · VRR · ALLM",
+    category: "Gaming & Inputs",
+    accentColor: "#6366f1",
+    tileBgColor: "#171926",
+    tileTextColor: "#ffffff",
+    iconKey: "gamepad",
+    enabled: true,
+  },
+  {
+    id: "org.webosbrew.hbchannel",
+    name: "Homebrew",
+    subtitle: "Root Services & Mods",
+    category: "System",
+    accentColor: "#f97316",
+    tileBgColor: "#27170c",
+    tileTextColor: "#ffffff",
+    iconKey: "homebrew",
+    enabled: false,
   },
 ];
 
@@ -181,13 +225,18 @@ export const DEFAULT_G3_CONFIG: G3ModConfig = {
   curlInsecure: false,
   fakeServicePath: "/usr/palm/services/com.palm.service.devmode",
   launcherTheme: {
+    uiParadigm: "cleanframe-list",
+    focusTreatment: "type",
+    materialStyle: "clear-tint",
     activeSeason: "fall-pumpkin",
     greetingTitle: "Autumn Harvest on G3 OLED",
-    greetingSubtitle: "Cozy Fall & Pumpkin Ambience · Instant Sidebar Navigation",
+    greetingSubtitle: "CleanFrame Typography + Piny Squircle Sidebar · Fall & Pumpkin Edition",
     ambientParticles: true,
     turnOnAnimation: true,
     sidebarPosition: "left",
     sidebarStyle: "frosted-glass",
+    showContentShelves: false,
+    oledBrightness: 82,
     autoHideSidebarSec: 15,
     customWallpaperUrl: "",
   },
@@ -222,7 +271,14 @@ export const DEFAULT_G3_CONFIG: G3ModConfig = {
   },
   keybinds: {
     installInputHook: true,
+    hijackHomeButton: true,
     mappings: {
+      home: {
+        buttonName: "HOME Button (773)",
+        uinputCode: "773",
+        action: "launch",
+        targetAppId: "tld.slopbro.g3mod",
+      },
       netflix: {
         buttonName: "Netflix",
         uinputCode: "1037",
@@ -335,9 +391,137 @@ export function generateKeybindsJson(cfg: G3ModConfig["keybinds"]): string {
   return JSON.stringify(obj, null, 2);
 }
 
+export function generateWebosLauncherHtml(cfg: G3ModConfig): string {
+  const enabledApps = (cfg.sidebarApps || DEFAULT_SIDEBAR_APPS).filter(
+    (a) => a.enabled
+  );
+  const appsJson = JSON.stringify(enabledApps);
+  const themeJson = JSON.stringify(cfg.launcherTheme);
+
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=1920, height=1080, initial-scale=1.0" />
+<title>lgOS-getSlopped Custom TV Launcher</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; user-select: none; }
+  html, body {
+    width: 100vw; height: 100vh; overflow: hidden;
+    background: #070403; color: #fff;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  }
+  #stage {
+    position: relative; width: 100%; height: 100%;
+    display: flex; align-items: stretch; justify-content: space-between;
+    padding: 56px 72px;
+    background: radial-gradient(circle at 75% 22%, rgba(249,115,22,0.28) 0%, rgba(38,16,5,0.88) 48%, #060302 100%);
+  }
+  .clock-tl {
+    font-size: 46px; font-weight: 300; letter-spacing: 0.04em;
+    color: rgba(255,255,255,0.92); margin-bottom: 36px;
+  }
+  .cleanframe-list {
+    display: flex; flex-direction: column; gap: 18px;
+  }
+  .cf-item {
+    display: flex; align-items: center; gap: 22px;
+    font-size: 54px; font-weight: 600; letter-spacing: -0.02em;
+    color: rgba(255,255,255,0.38); transition: all 0.16s ease;
+    cursor: pointer;
+  }
+  .cf-item.focused {
+    color: #ffffff; transform: translateX(8px) scale(1.03);
+    text-shadow: 0 8px 32px rgba(249,115,22,0.45);
+  }
+  .piny-rail {
+    display: flex; flex-direction: column; gap: 14px;
+  }
+  .piny-tile {
+    width: 132px; height: 92px; border-radius: 22px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 20px; font-weight: 800; letter-spacing: -0.02em;
+    opacity: 0.55; transition: all 0.16s ease;
+  }
+  .piny-tile.focused {
+    opacity: 1; transform: scale(1.06);
+    box-shadow: 0 -10px 30px rgba(255,255,255,0.65), 0 12px 32px rgba(0,0,0,0.8);
+    outline: 3px solid rgba(255,255,255,0.9);
+  }
+</style>
+</head>
+<body>
+<div id="stage">
+  <div id="left-col">
+    <div class="clock-tl" id="clock">9:41</div>
+    <div id="app-container"></div>
+  </div>
+</div>
+<script>
+  const APPS = ${appsJson};
+  const THEME = ${themeJson};
+  let idx = 0;
+
+  function updateClock() {
+    const d = new Date();
+    const h = d.getHours() % 12 || 12;
+    const m = String(d.getMinutes()).padStart(2, "0");
+    document.getElementById("clock").textContent = h + ":" + m;
+  }
+  setInterval(updateClock, 5000);
+  updateClock();
+
+  function launchApp(appId) {
+    if (window.webOS && window.webOS.service) {
+      window.webOS.service.request("luna://com.webos.applicationManager", {
+        method: "launch",
+        parameters: { id: appId }
+      });
+    } else if (window.PalmSystem && window.PalmServiceBridge) {
+      const b = new PalmServiceBridge();
+      b.call("luna://com.webos.applicationManager/launch", JSON.stringify({ id: appId }));
+    }
+  }
+
+  function render() {
+    const root = document.getElementById("app-container");
+    root.className = THEME.uiParadigm === "piny-tiles" ? "piny-rail" : "cleanframe-list";
+    root.innerHTML = "";
+    APPS.forEach((app, i) => {
+      const el = document.createElement("div");
+      if (THEME.uiParadigm === "piny-tiles") {
+        el.className = "piny-tile" + (i === idx ? " focused" : "");
+        el.style.background = app.tileBgColor || "#1f2326";
+        el.style.color = app.tileTextColor || "#ffffff";
+        el.textContent = app.name;
+      } else {
+        el.className = "cf-item" + (i === idx ? " focused" : "");
+        el.textContent = app.name;
+      }
+      el.onclick = () => { idx = i; render(); launchApp(app.id); };
+      root.appendChild(el);
+    });
+  }
+
+  window.addEventListener("keydown", (e) => {
+    if (e.key === "ArrowDown" || e.keyCode === 40) {
+      idx = (idx + 1) % APPS.length; render();
+    } else if (e.key === "ArrowUp" || e.keyCode === 38) {
+      idx = (idx - 1 + APPS.length) % APPS.length; render();
+    } else if (e.key === "Enter" || e.keyCode === 13) {
+      if (APPS[idx]) launchApp(APPS[idx].id);
+    }
+  });
+  render();
+</script>
+</body>
+</html>`;
+}
+
 export function generateDebloatScript(cfg: G3ModConfig): string {
   const homeXml = generateHomeXml(cfg.homeLayout);
   const keybindsJson = generateKeybindsJson(cfg.keybinds);
+  const launcherHtml = generateWebosLauncherHtml(cfg);
   const enabledSidebarApps = (cfg.sidebarApps || DEFAULT_SIDEBAR_APPS).filter(
     (a) => a.enabled
   );
@@ -364,10 +548,11 @@ export function generateDebloatScript(cfg: G3ModConfig): string {
 # lgOS-getSlopped (${cfg.githubOwner}/${cfg.repoName})
 # Built on SlopBro for LG ${cfg.tvModel} (${cfg.webosVersion})
 # Target IP: ${cfg.tvIp}
-# Active Theme: ${cfg.launcherTheme.activeSeason} ("${cfg.launcherTheme.greetingTitle}")
+# UI Paradigm: ${cfg.launcherTheme.uiParadigm} · Focus: ${cfg.launcherTheme.focusTreatment}
+# Active Season: ${cfg.launcherTheme.activeSeason} ("${cfg.launcherTheme.greetingTitle}")
 # Sidebar Apps (${enabledSidebarApps.length}): ${enabledSidebarApps.map((a) => a.name).join(", ")}
 #
-# Plug-and-Play SquashFS Bind-Mount Overlay + Sidebar Launcher Configuration:
+# Plug-and-Play Custom TV Launcher (tld.slopbro.g3mod) + SquashFS Home Overlay:
 # Rebooting in failsafe mode or running with --revert cleanly restores stock OS.
 # ==============================================================================
 
@@ -408,7 +593,27 @@ mkdir -p "\${MOD_DIR}/assets/images/hd" \\
          "\${MOD_DIR}/assets/i18n" \\
          "\${INITD_DIR}"
 
-# Save sidebar & seasonal theme manifest for custom launcher & overlay
+# 0. Write Standalone Custom webOS TV Launcher App (tld.slopbro.g3mod)
+cat > "\${MOD_DIR}/appinfo.json" << 'APPINFO_EOF'
+{
+  "id": "tld.slopbro.g3mod",
+  "version": "2.0.0",
+  "vendor": "lgOS-getSlopped",
+  "type": "web",
+  "main": "index.html",
+  "title": "lgOS-getSlopped Home",
+  "icon": "icon.png",
+  "transparent": false,
+  "handlesRelaunch": true,
+  "disableBackHistoryAPI": true
+}
+APPINFO_EOF
+
+cat > "\${MOD_DIR}/index.html" << 'LAUNCHER_HTML_EOF'
+${launcherHtml}
+LAUNCHER_HTML_EOF
+
+# Save sidebar & seasonal theme manifest
 cat > "\${MOD_DIR}/launcher-config.json" << 'THEME_EOF'
 ${JSON.stringify(
   {
@@ -429,6 +634,7 @@ EOF
 generate_black_png() {
     printf '\\211PNG\\r\\n\\032\\n\\000\\000\\000\\rIHDR\\000\\000\\000\\001\\000\\000\\000\\001\\010\\002\\000\\000\\000\\220wS\\336\\000\\000\\000\\014IDATx\\234c\`\`\`\\000\\000\\000\\004\\000\\001\\366\\0278U\\000\\000\\000\\000IEND\\256B\`\\202' > "\${1}"
 }
+generate_black_png "\${MOD_DIR}/icon.png"
 ${
   cfg.homeLayout.oledBlackBanner
     ? `generate_black_png "\${MOD_DIR}/assets/images/hd/bg_banner_img.png"
@@ -563,6 +769,9 @@ ${
     ? `pkill -f rdxd 2>/dev/null || true`
     : ""
 }
+
+# Re-scan developer apps so tld.slopbro.g3mod is registered with SAM
+luna-send -n 1 'luna://com.webos.applicationManager/dev/listApps' '{}' >/dev/null 2>&1 || true
 APPLY_EOF
 
 chmod +x "\${MOD_DIR}/apply.sh"
@@ -594,7 +803,7 @@ luna-send -n 1 -a org.webosbrew.inputhook luna://org.webosbrew.inputhook.service
 
 sh "\${MOD_DIR}/apply.sh"
 log "lgOS-getSlopped optimization complete!"
-toast "Fall Harvest Home &amp; Privacy Armor active!"
+toast "CleanFrame + Piny Custom Home &amp; Privacy Armor active!"
 `;
 }
 
