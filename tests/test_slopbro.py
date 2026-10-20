@@ -26,6 +26,7 @@ class CommandLineTests(unittest.TestCase):
             local_ip_override=None, webos_version_override=None,
             curl_insecure=False, fake_service_path=slopbro.DEFAULT_FAKE_SERVICE_PATH,
             log_wait=slopbro.DEFAULT_LOG_WAIT,
+            connect_timeout=slopbro.CONNECT_TIMEOUT,
         )
         self.runners["run_test_connection"].assert_not_called()
         self.runners["run_test_payload"].assert_not_called()
@@ -45,6 +46,7 @@ class CommandLineTests(unittest.TestCase):
                 local_ip_override="192.168.1.2", webos_version_override="6.5",
                 curl_insecure=True, fake_service_path=slopbro.DEFAULT_FAKE_SERVICE_PATH,
                 log_wait=slopbro.DEFAULT_LOG_WAIT,
+                connect_timeout=slopbro.CONNECT_TIMEOUT,
             )
 
     def test_fake_service_path_options(self):

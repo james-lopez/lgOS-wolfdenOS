@@ -1111,6 +1111,7 @@ def run(
     curl_insecure=False,
     fake_service_path=DEFAULT_FAKE_SERVICE_PATH,
     log_wait=DEFAULT_LOG_WAIT,
+    connect_timeout=CONNECT_TIMEOUT,
 ):
     secure = True
     port = PORT_TLS if secure else PORT_PLAIN
@@ -1181,6 +1182,7 @@ def run(
             host,
             port,
             secure=secure,
+            timeout=connect_timeout,
         )
     except (OSError, WebSocketError) as exc:
         die("could not connect to TV: %s" % exc)
@@ -1287,6 +1289,15 @@ def main(argv=None):
         "--debug", action="store_true", help="enable payload debug output",
     )
     parser.add_argument(
+        "--connect-timeout", metavar="<seconds>", type=float,
+        default=CONNECT_TIMEOUT,
+        help=(
+            "socket and TLS handshake timeout (default: %.0f). Raise this when "
+            "the TV is on a different subnet: the handshake needs longer over "
+            "a routed path" % CONNECT_TIMEOUT
+        ),
+    )
+    parser.add_argument(
         "--log-wait", metavar="<seconds>", type=int, default=DEFAULT_LOG_WAIT,
         help=(
             "seconds to hold the HTTP server open after install to collect "
@@ -1359,6 +1370,7 @@ def main(argv=None):
             curl_insecure=args.curl_insecure,
             fake_service_path=args.fake_service_path,
             log_wait=args.log_wait,
+            connect_timeout=args.connect_timeout,
         )
     return 0
 

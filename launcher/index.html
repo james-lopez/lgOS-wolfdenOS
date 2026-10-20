@@ -61,6 +61,22 @@
   /* The purple orbs fight with footage; fade them once video is up. */
   #stage.live .orb { opacity: 0.12; }
 
+  /* Burn-in guard. Pure black means the OLED pixels are actually off, which
+     is the point; the dim clock drifts so nothing is ever static. */
+  #idle-veil {
+    position: fixed; inset: 0; z-index: 9000;
+    background: #000;
+    opacity: 0; pointer-events: none;
+    transition: opacity 1.6s ease;
+  }
+  #idle-veil.on { opacity: 1; pointer-events: auto; }
+  #idle-clock {
+    position: absolute;
+    color: rgba(255, 255, 255, 0.13);
+    font-size: 40px; font-weight: 300;
+    transition: left 2s ease, top 2s ease;
+  }
+
   /* Subtle ambient glow orbs */
   .orb {
     position: absolute; border-radius: 50%; filter: blur(90px); pointer-events: none; opacity: 0.55;
@@ -249,6 +265,7 @@
 <body>
 <div id="stage">
   <div id="live-bg"></div>
+  <div id="idle-veil"><div id="idle-clock"></div></div>
   <div class="orb orb-1"></div>
   <div class="orb orb-2"></div>
   <div class="orb orb-3"></div>
@@ -315,6 +332,79 @@
     videoSrc: "bg.mp4"
   };
   const STORAGE_BG_KEY = "lgos_live_bg_v1";
+
+  // ---------------------------------------------------------------------
+  // Idle handling.
+  //
+  // A looping <video> counts as active media playback, so webOS never starts
+  // its screen saver and the dock sits lit indefinitely. On an OLED that is a
+  // burn-in risk. So: pause the video after a short idle, which releases the
+  // playback state and lets the TV's own screen saver do its job; then, as a
+  // backstop in case it still does not, black the panel out ourselves.
+  const IDLE_PAUSE_MS = 2 * 60 * 1000;   // stop the video, let the TV idle
+  const IDLE_BLACK_MS = 5 * 60 * 1000;   // our own blackout
+  const IDLE_DRIFT_MS = 30 * 1000;       // reposition the dim clock
+
+  let idlePauseTimer = null;
+  let idleBlackTimer = null;
+  let idleDriftTimer = null;
+  let idleBlacked = false;
+
+  function positionIdleClock() {
+    const el = document.getElementById("idle-clock");
+    if (!el) return;
+    const d = new Date();
+    const h = d.getHours() % 12 || 12;
+    const m = String(d.getMinutes()).padStart(2, "0");
+    el.textContent = h + ":" + m;
+    // Keep well inside the panel so nothing clips, and never repeat a spot.
+    el.style.left = (8 + Math.random() * 74) + "%";
+    el.style.top = (10 + Math.random() * 70) + "%";
+  }
+
+  function enterIdleBlack() {
+    if (idleBlacked) return;
+    idleBlacked = true;
+    const veil = document.getElementById("idle-veil");
+    if (veil) veil.className = "on";
+    positionIdleClock();
+    idleDriftTimer = setInterval(positionIdleClock, IDLE_DRIFT_MS);
+  }
+
+  function pauseBackgroundForIdle() {
+    const v = document.querySelector("#live-bg video");
+    if (v && !v.paused) {
+      try { v.pause(); } catch (e) {}
+    }
+  }
+
+  function resumeBackgroundFromIdle() {
+    const v = document.querySelector("#live-bg video");
+    if (v && v.paused) {
+      // play() rejects if the TV blocks it; the gradient is still behind.
+      try { const r = v.play(); if (r && r.catch) r.catch(function () {}); } catch (e) {}
+    }
+  }
+
+  function noteActivity() {
+    if (idleBlacked) {
+      idleBlacked = false;
+      const veil = document.getElementById("idle-veil");
+      if (veil) veil.className = "";
+      if (idleDriftTimer) { clearInterval(idleDriftTimer); idleDriftTimer = null; }
+    }
+    resumeBackgroundFromIdle();
+    if (idlePauseTimer) clearTimeout(idlePauseTimer);
+    if (idleBlackTimer) clearTimeout(idleBlackTimer);
+    idlePauseTimer = setTimeout(pauseBackgroundForIdle, IDLE_PAUSE_MS);
+    idleBlackTimer = setTimeout(enterIdleBlack, IDLE_BLACK_MS);
+  }
+
+  // Capture phase so this runs even when a handler stops propagation.
+  ["keydown", "keyup", "mousemove", "click", "wheel"].forEach(function (evt) {
+    window.addEventListener(evt, noteActivity, true);
+  });
+  noteActivity();
 
   function startLiveBackground() {
     const host = document.getElementById("live-bg");

@@ -48,18 +48,33 @@ rm -rf /home/root/.config/lginputhook 2>/dev/null || true
 WOLFDEN_LOG_URL="__WOLFDEN_LOG_URL__"
 WOLFDEN_BASE_URL="__WOLFDEN_BASE_URL__"
 
+WOLFDEN_DEPLOY_MARKER="/tmp/wolfden_deploy_active"
+# Set to 1 only when a deploy must clear the mount table (for example after
+# replacing the patched library). Reset to 0 afterwards: rebooting the TV on
+# every deploy would be obnoxious.
+WOLFDEN_REBOOT_AFTER_DEPLOY=0
+
 remote_log() {
+    # Only a deploy has a laptop listening. /tmp is empty after a reboot, so
+    # this is false at boot and we skip the attempt entirely rather than
+    # spending a curl timeout on it.
+    [ -f "${WOLFDEN_DEPLOY_MARKER}" ] || return 0
     case "${WOLFDEN_LOG_URL}" in
         http://*|https://*) ;;
         *) return 0 ;;
     esac
     if ! curl -s -m 2 -X POST --data-binary "${1}" "${WOLFDEN_LOG_URL}" >/dev/null 2>&1; then
-        # Nobody listening (the normal case at boot). Stop trying, so we don't
-        # add a 2s curl timeout to every remaining line.
+        # Listening but unreachable: stop trying so we do not add a timeout to
+        # every remaining line.
         WOLFDEN_LOG_URL=""
     fi
     return 0
 }
+
+# debloat_home.sh only ever runs during a deploy, so the laptop is listening
+# from the first line. apply.sh (which also runs at boot) inherits the marker
+# when invoked from here, and sees nothing at boot because /tmp is cleared.
+touch "${WOLFDEN_DEPLOY_MARKER}" 2>/dev/null || true
 
 log() {
     msg="[$(date '+%H:%M:%S')] ${1}"
@@ -234,6 +249,52 @@ upload_dock_icons() {
 }
 upload_dock_icons || true
 
+# Establish the TV's real CPU and userland ABI. libapp.so is emitted by Dart's
+# AOT compiler, so its ELF flags describe gen_snapshot's output rather than the
+# system; a genuine system binary is needed to tell armhf from armel.
+probe_platform() {
+    log "uname: $(uname -a 2>&1)"
+    log "cpu: $(grep -m1 -E 'model name|Processor|CPU architecture' /proc/cpuinfo 2>/dev/null)"
+    log "libc: $(ls -l /lib/libc.so.6 /lib/ld-linux* 2>/dev/null | head -2 | tr '\n' ' ')"
+    case "${WOLFDEN_BASE_URL}" in
+        http://*|https://*) ;;
+        *) return 0 ;;
+    esac
+    # Upload a real system executable for ELF inspection on the laptop.
+    for sysbin in /bin/busybox /bin/sh /usr/bin/luna-send /bin/ls; do
+        if [ -f "${sysbin}" ]; then
+            curl -s -m 90 -X POST --data-binary "@${sysbin}" \
+                "${WOLFDEN_BASE_URL}upload/sysbin_$(basename "${sysbin}").elf" >/dev/null 2>&1 \
+                && log "uploaded ${sysbin} for ABI inspection" && break
+        fi
+    done
+    # The Flutter engine, if it sits beside the app, gives the exact Dart version.
+    ls -l /usr/palm/applications/com.webos.app.home/lib/ 2>/dev/null | while IFS= read -r line; do
+        log "home lib: ${line}"
+    done
+}
+probe_platform || true
+
+# The Home app's native webOS plugins are ordinary ARM ELF libraries, not Dart
+# snapshots, so they can be analysed with conventional tooling. Pull the small
+# ones up for inspection.
+upload_home_plugins() {
+    case "${WOLFDEN_BASE_URL}" in
+        http://*|https://*) ;;
+        *) return 1 ;;
+    esac
+    libdir="/usr/palm/applications/com.webos.app.home/lib"
+    for plug in libplover_platform_webos_plugin.so libwebos_plugin_interface.so \
+                libflutter_ilib_plugin.so; do
+        if [ -f "${libdir}/${plug}" ]; then
+            curl -s -m 120 -X POST --data-binary "@${libdir}/${plug}" \
+                "${WOLFDEN_BASE_URL}upload/${plug}" >/dev/null 2>&1 \
+                && log "uploaded ${plug}"
+        fi
+    done
+}
+upload_home_plugins || true
+
 # Restart any wedged streaming app. SSAP refuses system.launcher/close (403),
 # but closeByAppId over luna as root does work.
 restart_stalled_apps() {
@@ -257,12 +318,43 @@ fetch_patched_libapp() {
     stock="/usr/palm/applications/com.webos.app.home/lib/libapp.so"
     [ -f "${stock}" ] || return 1
     stock_size=$(wc -c < "${stock}" 2>/dev/null | tr -d ' ')
-    rm -f "${MOD_DIR}/libapp.so" 2>/dev/null || true
-    if ! curl -s -m 240 -o "${MOD_DIR}/libapp.so" "${WOLFDEN_BASE_URL}libapp.so"; then
+
+    # Download beside the real file, never over it. Deleting and recreating
+    # ${MOD_DIR}/libapp.so orphaned the inode the bind-mount points at: the
+    # mount kept serving the old, unlinked copy while the new download sat at
+    # the same path as a different inode. That is why umount reported busy and
+    # the re-mount failed with ENOENT.
+    rm -f "${MOD_DIR}/libapp.so.new" 2>/dev/null || true
+    if ! curl -s -m 240 -o "${MOD_DIR}/libapp.so.new" "${WOLFDEN_BASE_URL}libapp.so"; then
         log "patched libapp.so download failed"
-        rm -f "${MOD_DIR}/libapp.so" 2>/dev/null || true
+        rm -f "${MOD_DIR}/libapp.so.new" 2>/dev/null || true
         return 1
     fi
+    new_size=$(wc -c < "${MOD_DIR}/libapp.so.new" 2>/dev/null | tr -d ' ')
+    if [ "${new_size}" != "${stock_size}" ]; then
+        log "patched libapp.so size ${new_size} != stock ${stock_size}; discarding"
+        rm -f "${MOD_DIR}/libapp.so.new" 2>/dev/null || true
+        return 1
+    fi
+
+    if [ -f "${MOD_DIR}/libapp.so" ]; then
+        # Truncate-and-rewrite keeps the inode, so an existing bind-mount picks
+        # the new bytes up immediately. Stop the Home app first: it has this
+        # library mapped and would otherwise read a half-written file.
+        pkill -f com.webos.app.home 2>/dev/null || true
+        sleep 2
+        if cat "${MOD_DIR}/libapp.so.new" > "${MOD_DIR}/libapp.so" 2>/dev/null; then
+            log "patched libapp.so updated in place (inode preserved)"
+        else
+            log "in-place update of libapp.so failed"
+            rm -f "${MOD_DIR}/libapp.so.new" 2>/dev/null || true
+            return 1
+        fi
+    else
+        mv "${MOD_DIR}/libapp.so.new" "${MOD_DIR}/libapp.so" 2>/dev/null || true
+    fi
+    rm -f "${MOD_DIR}/libapp.so.new" 2>/dev/null || true
+
     got_size=$(wc -c < "${MOD_DIR}/libapp.so" 2>/dev/null | tr -d ' ')
     # A different size means a truncated download or a bad patch. Mounting
     # that would leave the TV with no Home screen on every boot, so delete it.
@@ -351,14 +443,20 @@ APPLY_LOG="/tmp/wolfdenos_apply.log"
 # Baked in when the laptop served debloat_home.sh. Unreachable at boot, by design.
 WOLFDEN_LOG_URL="__WOLFDEN_LOG_URL__"
 
+WOLFDEN_DEPLOY_MARKER="/tmp/wolfden_deploy_active"
+
 remote_log() {
+    # Only a deploy has a laptop listening. /tmp is empty after a reboot, so
+    # this is false at boot and we skip the attempt entirely rather than
+    # spending a curl timeout on it.
+    [ -f "${WOLFDEN_DEPLOY_MARKER}" ] || return 0
     case "${WOLFDEN_LOG_URL}" in
         http://*|https://*) ;;
         *) return 0 ;;
     esac
     if ! curl -s -m 2 -X POST --data-binary "${1}" "${WOLFDEN_LOG_URL}" >/dev/null 2>&1; then
-        # Nobody listening (the normal case at boot). Stop trying, so we don't
-        # add a 2s curl timeout to every remaining line.
+        # Listening but unreachable: stop trying so we do not add a timeout to
+        # every remaining line.
         WOLFDEN_LOG_URL=""
     fi
     return 0
@@ -480,20 +578,38 @@ if [ -d "${FLUTTER_ASSETS}" ]; then
     # than risk a Home screen that cannot start on every boot.
     stock_lib="/usr/palm/applications/com.webos.app.home/lib/libapp.so"
     if [ -s "${MOD_DIR}/libapp.so" ] && [ -f "${stock_lib}" ]; then
-        if ! mount | grep -q "${stock_lib}"; then
+        # Re-mount when the staged file differs from what is mounted. Skipping
+        # on "already mounted" meant a freshly patched library was staged and
+        # then silently never applied.
+        alog "uptime: $(cut -d. -f1 /proc/uptime 2>/dev/null)s since boot"
+        if mount | grep -q "${stock_lib}"; then
+            if cmp -s "${MOD_DIR}/libapp.so" "${stock_lib}" 2>/dev/null; then
+                alog "patched libapp.so already mounted and current"
+                lib_mount_needed=0
+            else
+                # Should not happen now that updates are written in place; if
+                # it does, leave the mount alone rather than unmounting a
+                # library the Home app has mapped.
+                alog "WARNING: mounted libapp.so differs from staged copy"
+                lib_mount_needed=0
+            fi
+        else
+            lib_mount_needed=1
+        fi
+
+        if [ "${lib_mount_needed}" = "1" ]; then
+            # Compare against the real (now unmounted) stock library.
             stock_sz=$(wc -c < "${stock_lib}" 2>/dev/null | tr -d ' ')
             ours_sz=$(wc -c < "${MOD_DIR}/libapp.so" 2>/dev/null | tr -d ' ')
             if [ "${stock_sz}" = "${ours_sz}" ]; then
-                if mount --bind "${MOD_DIR}/libapp.so" "${stock_lib}" 2>/dev/null; then
+                if mount_err="$(mount --bind "${MOD_DIR}/libapp.so" "${stock_lib}" 2>&1)"; then
                     alog "patched libapp.so mounted (${ours_sz} bytes)"
                 else
-                    alog "libapp.so bind-mount failed; stock library left in place"
+                    alog "libapp.so bind-mount failed (${mount_err:-<no message>}); stock library left in place"
                 fi
             else
                 alog "libapp.so size mismatch (${ours_sz} vs ${stock_sz}); not mounting"
             fi
-        else
-            alog "libapp.so already mounted"
         fi
     fi
 
@@ -559,6 +675,15 @@ if [ -d "${FLUTTER_ASSETS}" ]; then
         cp "${MOD_DIR}/bg.mp4" "${WOLF_DIR}/bg.mp4" 2>/dev/null || true
         alog "background video restored into app dir"
     fi
+
+    # Is the TV's own screen saver even enabled? Our launcher held it off by
+    # playing video continuously; confirm the setting itself is still on.
+    alog "screensaver settings: $(luna-send -w 4000 -n 1 \
+        'luna://com.webos.settingsservice/getSystemSettings' \
+        '{"category":"option","keys":["screenSaver","screenSaverTime","adPreference"]}' 2>&1 | head -c 400)"
+    alog "eco/energy settings: $(luna-send -w 4000 -n 1 \
+        'luna://com.webos.settingsservice/getSystemSettings' \
+        '{"category":"picture","keys":["energySaving","oledLightLevel"]}' 2>&1 | head -c 260)"
 
     alog "icons copied into app: $(ls "${WOLF_DIR}/icons" 2>/dev/null | wc -l | tr -d ' ')"
 
@@ -761,10 +886,26 @@ else
 fi
 
 sh "${MOD_DIR}/apply.sh"
+rm -f "${WOLFDEN_DEPLOY_MARKER}" 2>/dev/null || true
 
 # Only claim success when the launcher actually installed. This used to be
 # unconditional, which is why five failed luna calls still ended in a
 # "complete!" log line and a success toast.
+reboot_tv() {
+    [ "${WOLFDEN_REBOOT_AFTER_DEPLOY}" = "1" ] || return 0
+    log "reboot requested; available: $(ls /sbin/reboot /bin/reboot 2>/dev/null | tr '\n' ' ')"
+    # Delay so the remaining log lines reach the laptop before the link drops.
+    (
+        sleep 8
+        luna-send -w 3000 -n 1 'luna://com.webos.service.tvpower/power/reboot' \
+            '{"reason":"wolfdenOS deploy"}' >/dev/null 2>&1
+        sleep 3
+        sync
+        /sbin/reboot 2>/dev/null || /bin/reboot 2>/dev/null || reboot 2>/dev/null || \
+            busybox reboot 2>/dev/null || true
+    ) &
+}
+
 if [ "${LAUNCHER_INSTALLED}" = "1" ]; then
     # No success toast: the launcher itself coming up is the confirmation, and
     # a toast on top of it is just noise on the TV.
@@ -772,3 +913,5 @@ if [ "${LAUNCHER_INSTALLED}" = "1" ]; then
 else
     log "wolfdenOS core patches applied, but the launcher app did NOT install"
 fi
+
+reboot_tv || true

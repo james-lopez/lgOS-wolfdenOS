@@ -23,6 +23,26 @@ import argparse
 import os
 import sys
 
+# Luna endpoints to neutralise. Each is rewritten to a same-length URI under a
+# service that does not exist, so the call fails instead of fetching an ad.
+# Padded with 'x' rather than spaces: these are URIs, not display text.
+DEAD_ENDPOINT_BASE = b"luna://com.wolfden.disabled/"
+DEAD_ENDPOINTS = (
+    b"luna://com.webos.service.admanager/requestBannerInfoWithoutContextIndex",
+    b"luna://com.webos.service.admanager/sendImpressionTracker",
+    b"luna://com.webos.service.admanager/handleClickBanner",
+    b"luna://com.webos.service.admanager/launchCMPApp",
+    b"luna://com.webos.service.admanager/requestAssetClickInfo",
+)
+
+
+def dead_uri(original):
+    out = DEAD_ENDPOINT_BASE + original.rsplit(b"/", 1)[-1]
+    if len(out) > len(original):
+        return out[:len(original)]
+    return out + b"x" * (len(original) - len(out))
+
+
 # original (exact bytes in the library) -> what to show instead
 REPLACEMENTS = {
     b"Enjoy the device's smart functions by connecting to a network.": b"wolfdenOS",
@@ -37,6 +57,22 @@ def smi(value):
     return value << 1
 
 
+def real_string_offsets(data, needle):
+    """
+    Offsets where `needle` is a standalone Dart string, not log text.
+
+    The same URI appears inside log messages, where the preceding four bytes
+    are ASCII rather than a Smi length. Only offsets whose header matches the
+    string's own length are real objects the code actually calls.
+    """
+    hits, i = [], data.find(needle)
+    while i != -1:
+        if i >= 4 and int.from_bytes(data[i - 4:i], "little") == smi(len(needle)):
+            hits.append(i)
+        i = data.find(needle, i + 1)
+    return hits
+
+
 def centre_pad(text, width):
     if len(text) > width:
         raise ValueError("replacement %r longer than the %d bytes available"
@@ -49,29 +85,36 @@ def centre_pad(text, width):
 def patch(data, verbose=True):
     out = bytearray(data)
     applied = []
-    for original, replacement in REPLACEMENTS.items():
-        offset = out.find(original)
-        if offset == -1:
-            print("  skip (not found): %r" % original[:42], file=sys.stderr)
+    jobs = [(o, r, True) for o, r in REPLACEMENTS.items()]
+    jobs += [(e, dead_uri(e), False) for e in DEAD_ENDPOINTS]
+
+    for original, replacement, centre in jobs:
+        real = real_string_offsets(out, original)
+        if not real:
+            print("  skip (no standalone string object): %r"
+                  % original[:46].decode("utf-8", "replace"), file=sys.stderr)
             continue
-        if out.find(original, offset + 1) != -1:
-            print("  skip (ambiguous, >1 match): %r" % original[:42], file=sys.stderr)
+        if len(real) > 1:
+            print("  skip (%d standalone copies, ambiguous): %r"
+                  % (len(real), original[:46].decode("utf-8", "replace")),
+                  file=sys.stderr)
             continue
 
-        # Confirm the length field really is this string's Smi before touching
-        # anything; if it is not, the layout is not what we think it is.
-        header = int.from_bytes(out[offset - 4:offset], "little")
-        if header != smi(len(original)):
-            print("  skip (length field %d != expected %d): %r"
-                  % (header, smi(len(original)), original[:42]), file=sys.stderr)
+        offset = real[0]
+        padded = (centre_pad(replacement, len(original)) if centre
+                  else replacement)
+        if len(padded) != len(original):
+            print("  skip (replacement length %d != %d): %r"
+                  % (len(padded), len(original), original[:46]), file=sys.stderr)
             continue
 
-        out[offset:offset + len(original)] = centre_pad(replacement, len(original))
+        out[offset:offset + len(original)] = padded
         applied.append((offset, original, replacement, len(original)))
         if verbose:
-            shown = replacement.decode() if replacement else "<blank>"
-            print("  @%-9d %-2d bytes  %-34s -> %s"
-                  % (offset, len(original), original[:34].decode(), shown))
+            shown = padded.decode("utf-8", "replace").strip() or "<blank>"
+            print("  @%-9d %-3d bytes  %-46s -> %s"
+                  % (offset, len(original),
+                     original[:46].decode("utf-8", "replace"), shown[:46]))
 
     if len(out) != len(data):
         raise RuntimeError("patched size changed; refusing to continue")

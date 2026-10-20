@@ -244,6 +244,135 @@ part of the signature.
 
 ---
 
+## Reverse Engineering the Home App: What We Learned
+
+### The target is not what Flutter tooling expects
+
+```
+kernel   : aarch64 (Linux 5.4.268 ptl4tv)
+userland : 32-bit ARM, soft-float (armel)
+loader   : /lib/ld-linux.so.3        (armhf would be ld-linux-armhf.so.3)
+snapshot : d20a1be77c3d3c41b2a5accaee1ce549
+flags    : product, arm, linux, no-compressed-pointers, null-safety
+```
+
+A 64-bit kernel running a 32-bit userland. This single fact closes most of the
+published tooling:
+
+- **blutter does not work.** It ships only `CodeAnalyzer_arm64.cpp` and
+  `Disassembler_arm64.cpp`, and its architecture detection asserts on anything
+  that is not AArch64 or x64. Check the target architecture *before* building
+  it; the build is long and the answer is in the ELF header.
+- **Frida has no armel server.** Releases carry `linux-armhf`,
+  `linux-armhf-musl`, `arm64`, `arm64be` and `armbe8`, but no soft-float arm.
+  The static `arm64-musl` server might run on the aarch64 kernel, but Frida
+  injects an agent matching the *target* process, and the Home app is 32-bit.
+- Published Flutter RE write-ups assume arm64 Android. The object-pool register
+  details in them (X27/X15) do not transfer.
+
+Do not take `libapp.so`'s own ELF flags as the system ABI: it is emitted by
+`gen_snapshot` and describes that output. Pull a real system binary
+(`/bin/busybox`) and read its interpreter instead.
+
+### LG did not obfuscate
+
+The snapshot carries 1,608 unique Dart source paths, 695 of them LG's own:
+
+```
+package:home/homewidgets/
+  recommendedshelves 229   app_list 122   qcardList 69   herobanner 49
+  globalline 30   recent_apps 30   options_popup 24   quickguide 22
+```
+
+State is Riverpod. `herobanner/lscall/` holds the Luna Service calls
+(`admanager_api.dart`, `hero_banner_api.dart`, `screen_status_api.dart`), and
+`herobanner/config/dimens_config/` plus `text_style_config/` hold layout and
+typography as data rather than code.
+
+### The native plugins are not where the action is
+
+`com.webos.app.home/lib/` contains `libplover_platform_webos_plugin.so`,
+`libvideo_player_webos_plugin.so`, `libflutter_ilib_plugin.so`,
+`libwebos_plugin_interface.so` and `libfastdev_quickjs_runtime.so`. They are
+unstripped ordinary ARM ELF libraries, but each exports a single
+`*RegisterWithRegistrar` symbol and contains **zero** `luna://` strings: they
+are generated Flutter MethodChannel scaffolding. Build paths leak
+`git/build/webos/arm/release` and `git/webos/flutter/ephemeral`, i.e. LG
+maintains its own webOS Flutter embedder. There is no `libflutter.so` here.
+
+### Finding real strings, not log text
+
+The 89 unique `luna://` URIs live in the Dart snapshot. **Most occurrences of a
+given URI are inside log messages**, e.g. `[AdManagerApi] luna://...`, where the
+preceding bytes are ASCII rather than a length field.
+
+Only an occurrence whose preceding 4-byte Smi equals `len * 2` is a real string
+object the code calls. `requestBannerInfoWithoutContextIndex` has one real
+object and five embedded in log text. A naive find-and-replace corrupts debug
+strings and leaves the actual call site untouched. `tools/patch_libapp.py`
+selects by header and refuses anything ambiguous — which is why it correctly
+declined `handleClickBanner`, whose only occurrences are log text.
+
+URIs are stored whole, not concatenated: the bare service name and bare method
+name have no standalone objects of their own.
+
+### Ads are disabled at the source
+
+Four endpoints are rewritten to same-length URIs under a service that does not
+exist, so the calls fail instead of fetching:
+
+```
+requestBannerInfoWithoutContextIndex   @3213140   71 bytes
+sendImpressionTracker                  @3145420   56 bytes
+launchCMPApp                           @2688028   47 bytes
+requestAssetClickInfo                  @3368548   56 bytes
+```
+
+This is more surgical than the DNS sinkhole, which is what broke the Content
+Store. `com.webos.service.homelaunchpoints` has 11 endpoints if the app row is
+ever worth the same treatment.
+
+---
+
+## Pitfalls Found the Hard Way (Day 2)
+
+**Never `rm` a file that is a bind-mount source.** Deleting
+`${MOD_DIR}/libapp.so` and re-downloading it orphans the inode the mount points
+at: the mount keeps serving the old, unlinked copy while the new file sits at
+the same path as a different inode. The symptoms are baffling —
+`cmp` reports a permanent difference, `umount` says *target is busy* because the
+Home app has the old inode mapped, and `mount --bind` fails with *ENOENT*
+because the original source is gone. Overwrite in place instead
+(`cat new > target`), which preserves the inode so a live mount picks the new
+bytes up immediately. Stop the Home app first; it has the library mapped.
+
+**A stale mount needs a real reboot.** Once a bind-mount is wedged, nothing
+clears it but dropping the mount table. QuickStart+ means powering off with the
+remote suspends to RAM and does *not* reboot the kernel. `apply.sh` has a
+`WOLFDEN_REBOOT_AFTER_DEPLOY` one-shot for this; leave it at `0`.
+
+**A looping `<video>` suppresses the screen saver.** Continuous media playback
+keeps webOS awake, so the dock stayed lit all night — a burn-in risk on OLED.
+The launcher now pauses the video after 2 minutes idle so the TV's own saver
+can engage, and blacks the panel out itself at 5 minutes with a drifting dim
+clock. Note `energySaving` reads `off` on this TV.
+
+**Deploys need the network in both directions.** The TV downloads the payload
+from the laptop and POSTs its logs back, so laptop-to-TV reachability is not
+enough. Across VLANs the TV could not reach `laptop:8080` and the deploy hung
+at "launching stage". `nc -z` reporting a port open proves only that something
+completed a TCP handshake, not that a session works.
+
+**`--log-wait` must outlast `apply.sh`.** Setting it to 25s closed the log
+server mid-run and lost everything `apply.sh` printed, including the reason a
+step failed. 60–90s is a safer floor.
+
+**The SSAP handshake can time out on a healthy TV.** `--connect-timeout` exists
+for this; 60s gets through when the default 10s does not. This happens
+on-subnet too, so it is not purely a latency effect.
+
+---
+
 ## Safety: `apply.sh` Runs on Every Boot
 
 A bad change re-applies itself at startup, so a power cycle does not clear it.
