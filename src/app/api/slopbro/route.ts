@@ -3,7 +3,19 @@ import { execFile } from "child_process";
 import fs from "fs/promises";
 import path from "path";
 
+export interface SidebarAppItem {
+  id: string;
+  name: string;
+  subtitle: string;
+  category: "Streaming" | "Media Server" | "Gaming & Inputs" | "System";
+  accentColor: string;
+  iconKey: string;
+  enabled: boolean;
+}
+
 export interface G3ModConfig {
+  repoName: string;
+  githubOwner: string;
   tvIp: string;
   tvModel: string;
   webosVersion: string;
@@ -11,8 +23,20 @@ export interface G3ModConfig {
   debug: boolean;
   curlInsecure: boolean;
   fakeServicePath: string;
+  launcherTheme: {
+    activeSeason: "fall-pumpkin" | "winter-aurora" | "midnight-oled" | "custom";
+    greetingTitle: string;
+    greetingSubtitle: string;
+    ambientParticles: boolean;
+    turnOnAnimation: boolean;
+    sidebarPosition: "left" | "right";
+    sidebarStyle: "frosted-glass" | "pure-oled";
+    autoHideSidebarSec: number;
+    customWallpaperUrl: string;
+  };
+  sidebarApps: SidebarAppItem[];
   homeLayout: {
-    mode: "stock-debloated" | "custom-home";
+    mode: "sidebar-launcher" | "stock-debloated";
     removeRecommendedShelf: boolean;
     removeQCardList: boolean;
     hideGlobalLine: boolean;
@@ -53,7 +77,102 @@ export interface G3ModConfig {
   };
 }
 
+export const DEFAULT_SIDEBAR_APPS: SidebarAppItem[] = [
+  {
+    id: "org.webosbrew.youtube.leanback.v4",
+    name: "YouTube AdFree",
+    subtitle: "4K HDR · SponsorBlock · 0 Ads",
+    category: "Streaming",
+    accentColor: "#f97316",
+    iconKey: "youtube",
+    enabled: true,
+  },
+  {
+    id: "netflix",
+    name: "Netflix",
+    subtitle: "Dolby Vision · Atmos",
+    category: "Streaming",
+    accentColor: "#ef4444",
+    iconKey: "netflix",
+    enabled: true,
+  },
+  {
+    id: "org.jellyfin.webos",
+    name: "Jellyfin",
+    subtitle: "Local Direct Play · 192.168.97.x",
+    category: "Media Server",
+    accentColor: "#a855f7",
+    iconKey: "jellyfin",
+    enabled: true,
+  },
+  {
+    id: "cdp-30",
+    name: "Plex",
+    subtitle: "Cinema Library · TrueHD",
+    category: "Media Server",
+    accentColor: "#f59e0b",
+    iconKey: "plex",
+    enabled: true,
+  },
+  {
+    id: "com.disney.disneyplus-prod",
+    name: "Disney+",
+    subtitle: "IMAX Enhanced · 4K",
+    category: "Streaming",
+    accentColor: "#3b82f6",
+    iconKey: "disney",
+    enabled: true,
+  },
+  {
+    id: "amazon",
+    name: "Prime Video",
+    subtitle: "UHD HDR10+",
+    category: "Streaming",
+    accentColor: "#06b6d4",
+    iconKey: "prime",
+    enabled: true,
+  },
+  {
+    id: "spotify-beehive",
+    name: "Spotify",
+    subtitle: "Lossless eARC Audio",
+    category: "Streaming",
+    accentColor: "#22c55e",
+    iconKey: "spotify",
+    enabled: true,
+  },
+  {
+    id: "com.webos.app.hdmi1",
+    name: "HDMI 1 · PlayStation 5",
+    subtitle: "4K 120Hz · VRR · ALLM",
+    category: "Gaming & Inputs",
+    accentColor: "#6366f1",
+    iconKey: "gamepad",
+    enabled: true,
+  },
+  {
+    id: "com.limelight.webos",
+    name: "Moonlight GameStream",
+    subtitle: "PC 4K 120fps · 0.8ms Decode",
+    category: "Gaming & Inputs",
+    accentColor: "#eab308",
+    iconKey: "moonlight",
+    enabled: true,
+  },
+  {
+    id: "org.webosbrew.hbchannel",
+    name: "Homebrew Channel",
+    subtitle: "Root Services & System Mods",
+    category: "System",
+    accentColor: "#ec4899",
+    iconKey: "homebrew",
+    enabled: true,
+  },
+];
+
 export const DEFAULT_G3_CONFIG: G3ModConfig = {
+  repoName: "lgOS-getSlopped",
+  githubOwner: "james-lopez",
   tvIp: "192.168.97.141",
   tvModel: "OLED65G3PUA",
   webosVersion: "10.3.0-2504 (webOS 25)",
@@ -61,14 +180,26 @@ export const DEFAULT_G3_CONFIG: G3ModConfig = {
   debug: true,
   curlInsecure: false,
   fakeServicePath: "/usr/palm/services/com.palm.service.devmode",
+  launcherTheme: {
+    activeSeason: "fall-pumpkin",
+    greetingTitle: "Autumn Harvest on G3 OLED",
+    greetingSubtitle: "Cozy Fall & Pumpkin Ambience · Instant Sidebar Navigation",
+    ambientParticles: true,
+    turnOnAnimation: true,
+    sidebarPosition: "left",
+    sidebarStyle: "frosted-glass",
+    autoHideSidebarSec: 15,
+    customWallpaperUrl: "",
+  },
+  sidebarApps: DEFAULT_SIDEBAR_APPS,
   homeLayout: {
-    mode: "stock-debloated",
+    mode: "sidebar-launcher",
     removeRecommendedShelf: true,
     removeQCardList: true,
     hideGlobalLine: true,
     hideQuickGuide: true,
     blankPromoText: true,
-    oledBlackBanner: true,
+    oledBlackBanner: false,
     heroBannerHeight: 1803,
     appListHeight: 248,
   },
@@ -207,6 +338,9 @@ export function generateKeybindsJson(cfg: G3ModConfig["keybinds"]): string {
 export function generateDebloatScript(cfg: G3ModConfig): string {
   const homeXml = generateHomeXml(cfg.homeLayout);
   const keybindsJson = generateKeybindsJson(cfg.keybinds);
+  const enabledSidebarApps = (cfg.sidebarApps || DEFAULT_SIDEBAR_APPS).filter(
+    (a) => a.enabled
+  );
 
   const bloatIds: string[] = [];
   if (cfg.bloatware.removeShopTime) bloatIds.push("com.lgshop.app");
@@ -227,10 +361,13 @@ export function generateDebloatScript(cfg: G3ModConfig): string {
 
   return `#!/bin/sh
 # ==============================================================================
-# SlopBro Post-Root Optimizer for LG ${cfg.tvModel} (${cfg.webosVersion})
+# lgOS-getSlopped (${cfg.githubOwner}/${cfg.repoName})
+# Built on SlopBro for LG ${cfg.tvModel} (${cfg.webosVersion})
 # Target IP: ${cfg.tvIp}
+# Active Theme: ${cfg.launcherTheme.activeSeason} ("${cfg.launcherTheme.greetingTitle}")
+# Sidebar Apps (${enabledSidebarApps.length}): ${enabledSidebarApps.map((a) => a.name).join(", ")}
 #
-# Generated by SlopBro G3 Studio. Safe SquashFS bind-mount overlay architecture:
+# Plug-and-Play SquashFS Bind-Mount Overlay + Sidebar Launcher Configuration:
 # Rebooting in failsafe mode or running with --revert cleanly restores stock OS.
 # ==============================================================================
 
@@ -243,7 +380,7 @@ FLUTTER_ASSETS="/usr/palm/applications/com.webos.app.home/data/flutter_assets/as
 LOG_FILE="/tmp/slopbro-debloat.log"
 
 if [ "\${1}" = "--revert" ] || [ "\${1}" = "--uninstall" ]; then
-    echo "[*] Reverting all SlopBro G3 customizations..."
+    echo "[*] Reverting all lgOS-getSlopped customizations..."
     rm -f "\${INITD_LINK}"
     umount "\${FLUTTER_ASSETS}" 2>/dev/null || true
     umount /etc/hosts 2>/dev/null || true
@@ -260,23 +397,35 @@ log() {
 }
 
 toast() {
-    payload="\$(printf '{"sourceId":"com.webos.service.secondscreen.gateway","message":"<h3>G3 Debloat &amp; Speedup</h3>%s"}' "\${1}")"
+    payload="\$(printf '{"sourceId":"com.webos.service.secondscreen.gateway","message":"<h3>lgOS-getSlopped</h3>%s"}' "\${1}")"
     luna-send -w 1000 -n 1 -a 'com.webos.service.secondscreen.gateway' 'luna://com.webos.notification/createToast' "\${payload}" >/dev/null 2>&1 || true
 }
 
-log "Applying OLED65G3PUA (webOS 10.3.0-2504) Home Speedup & Privacy configuration..."
+log "Applying lgOS-getSlopped (${cfg.tvModel} · ${cfg.webosVersion})..."
 mkdir -p "\${MOD_DIR}/assets/images/hd" \\
          "\${MOD_DIR}/assets/images/2k" \\
          "\${MOD_DIR}/assets/images/4k" \\
          "\${MOD_DIR}/assets/i18n" \\
          "\${INITD_DIR}"
 
+# Save sidebar & seasonal theme manifest for custom launcher & overlay
+cat > "\${MOD_DIR}/launcher-config.json" << 'THEME_EOF'
+${JSON.stringify(
+  {
+    theme: cfg.launcherTheme,
+    sidebarApps: enabledSidebarApps,
+  },
+  null,
+  2
+)}
+THEME_EOF
+
 # 1. Write customized Flutter home.xml
 cat > "\${MOD_DIR}/assets/home.xml" << 'EOF'
 ${homeXml}
 EOF
 
-# 1b. Generate 1x1 pure pitch-black PNG for zero-wear OLED background
+# 1b. Generate background banner asset
 generate_black_png() {
     printf '\\211PNG\\r\\n\\032\\n\\000\\000\\000\\rIHDR\\000\\000\\000\\001\\000\\000\\000\\001\\010\\002\\000\\000\\000\\220wS\\336\\000\\000\\000\\014IDATx\\234c\`\`\`\\000\\000\\000\\004\\000\\001\\366\\0278U\\000\\000\\000\\000IEND\\256B\`\\202' > "\${1}"
 }
@@ -285,12 +434,12 @@ ${
     ? `generate_black_png "\${MOD_DIR}/assets/images/hd/bg_banner_img.png"
 generate_black_png "\${MOD_DIR}/assets/images/2k/bg_banner_img.png"
 generate_black_png "\${MOD_DIR}/assets/images/4k/bg_banner_img.png"`
-    : "# Keeping default hero banner background image"
+    : "# Seasonal Fall & Pumpkin hero wallpaper enabled"
 }
 
 # 2. Write /etc/hosts Ad, ACR & Telemetry sinkhole
 cat > "\${MOD_DIR}/hosts.block" << 'EOF'
-# === SlopBro LG webOS 25 Ad, ACR (LivePlus) & Telemetry Sinkhole ===
+# === lgOS-getSlopped LG webOS 25 Ad, ACR (LivePlus) & Telemetry Sinkhole ===
 0.0.0.0 ad.lgappstv.com
 0.0.0.0 ibs.lgappstv.com
 0.0.0.0 lgad.cjpowercast.com
@@ -337,15 +486,13 @@ ${
 if [ -f "\${MOD_DIR}/hosts.block" ]; then
     umount /etc/hosts 2>/dev/null || true
     cp /etc/hosts /tmp/hosts.slopbro
-    grep -q "SlopBro LG webOS" /tmp/hosts.slopbro || cat "\${MOD_DIR}/hosts.block" >> /tmp/hosts.slopbro
+    grep -q "lgOS-getSlopped" /tmp/hosts.slopbro || cat "\${MOD_DIR}/hosts.block" >> /tmp/hosts.slopbro
     mount --bind /tmp/hosts.slopbro /etc/hosts 2>/dev/null || true
 fi`
     : "# Hosts sinkhole disabled"
 }
 
-${
-  cfg.homeLayout.mode === "stock-debloated"
-    ? `# B. Bind-mount stripped webOS 10.3.0 Flutter Home assets
+# B. Bind-mount stripped webOS 10.3.0 Flutter Home assets
 if [ -d "\${FLUTTER_ASSETS}" ]; then
     umount "\${FLUTTER_ASSETS}" 2>/dev/null || true
     rm -rf /tmp/weboshome-merged
@@ -392,9 +539,7 @@ if [ -d "\${FLUTTER_ASSETS}" ]; then
 
     mount --bind /tmp/weboshome-merged "\${FLUTTER_ASSETS}"
     pkill -f com.webos.app.home 2>/dev/null || true
-fi`
-    : "# Custom Home Launcher mode selected"
-}
+fi
 
 ${
   Object.keys(lunaOptionSettings).length > 0
@@ -447,16 +592,9 @@ luna-send -n 1 -a org.webosbrew.inputhook luna://org.webosbrew.inputhook.service
     : ""
 }
 
-${
-  cfg.homeLayout.mode === "custom-home"
-    ? `# 6. Install Custom webOS Home Launcher (tld.my.customhome)
-curl -k -fsSL "https://github.com/zzeppieri/webos-custom-home/releases/download/v0.4.2/tv-install.sh" | sh || true`
-    : ""
-}
-
 sh "\${MOD_DIR}/apply.sh"
-log "OLED65G3PUA optimization complete!"
-toast "G3 Home speedup &amp; privacy armor active!"
+log "lgOS-getSlopped optimization complete!"
+toast "Fall Harvest Home &amp; Privacy Armor active!"
 `;
 }
 
@@ -465,7 +603,16 @@ export async function GET() {
   let config = DEFAULT_G3_CONFIG;
   try {
     const raw = await fs.readFile(configFile, "utf-8");
-    config = { ...DEFAULT_G3_CONFIG, ...JSON.parse(raw) };
+    const parsed = JSON.parse(raw);
+    config = {
+      ...DEFAULT_G3_CONFIG,
+      ...parsed,
+      launcherTheme: {
+        ...DEFAULT_G3_CONFIG.launcherTheme,
+        ...(parsed.launcherTheme || {}),
+      },
+      sidebarApps: parsed.sidebarApps || DEFAULT_SIDEBAR_APPS,
+    };
   } catch {
     // use defaults
   }
@@ -490,7 +637,15 @@ export async function POST(request: Request) {
   try {
     const body = await request.json();
     const action = body.action || "save";
-    const config: G3ModConfig = { ...DEFAULT_G3_CONFIG, ...(body.config || {}) };
+    const config: G3ModConfig = {
+      ...DEFAULT_G3_CONFIG,
+      ...(body.config || {}),
+      launcherTheme: {
+        ...DEFAULT_G3_CONFIG.launcherTheme,
+        ...(body.config?.launcherTheme || {}),
+      },
+      sidebarApps: body.config?.sidebarApps || DEFAULT_SIDEBAR_APPS,
+    };
 
     const wwwroot = path.join(process.cwd(), "wwwroot");
     const configFile = path.join(wwwroot, "g3-config.json");
@@ -503,7 +658,6 @@ export async function POST(request: Request) {
       mode: 0o755,
     });
 
-    // Rebuild dist/slopbro_packed.py so the single-file bundle also embeds the updated debloat_home.sh
     await new Promise<void>((resolve) => {
       execFile(
         "python3",
@@ -540,7 +694,6 @@ export async function POST(request: Request) {
       ) {
         args.push("--fake-service-path", config.fakeServicePath);
       }
-      // On webOS 25 / 10.3.0, major version is 10
       args.push("--webos-version", "10");
       args.push(config.tvIp || "192.168.97.141");
 
@@ -555,7 +708,12 @@ export async function POST(request: Request) {
           { cwd: process.cwd(), timeout: 12000 },
           (error, stdout, stderr) => {
             resolve({
-              exitCode: error && typeof error.code === "number" ? error.code : error ? 1 : 0,
+              exitCode:
+                error && typeof error.code === "number"
+                  ? error.code
+                  : error
+                    ? 1
+                    : 0,
               stdout: stdout || "",
               stderr: stderr || "",
             });

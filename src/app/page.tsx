@@ -1,23 +1,26 @@
 "use client";
 
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useState, useCallback } from "react";
 import {
-  Tv,
-  ShieldCheck,
-  Zap,
-  Trash2,
   Gamepad2,
-  Terminal,
   Download,
   Play,
   Copy,
   Check,
   RefreshCw,
-  Eye,
-  Lock,
-  Layers,
   WifiOff,
-  RotateCcw,
+  Sparkles,
+  Power,
+  ChevronUp,
+  ChevronDown,
+  Upload,
+  Smartphone,
+  GitBranch,
+  Flame,
+  Film,
+  Music,
+  Server,
+  Compass,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -32,9 +35,20 @@ import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Separator } from "@/components/ui/separator";
+
+interface SidebarAppItem {
+  id: string;
+  name: string;
+  subtitle: string;
+  category: "Streaming" | "Media Server" | "Gaming & Inputs" | "System";
+  accentColor: string;
+  iconKey: string;
+  enabled: boolean;
+}
 
 interface G3ModConfig {
+  repoName: string;
+  githubOwner: string;
   tvIp: string;
   tvModel: string;
   webosVersion: string;
@@ -42,8 +56,20 @@ interface G3ModConfig {
   debug: boolean;
   curlInsecure: boolean;
   fakeServicePath: string;
+  launcherTheme: {
+    activeSeason: "fall-pumpkin" | "winter-aurora" | "midnight-oled" | "custom";
+    greetingTitle: string;
+    greetingSubtitle: string;
+    ambientParticles: boolean;
+    turnOnAnimation: boolean;
+    sidebarPosition: "left" | "right";
+    sidebarStyle: "frosted-glass" | "pure-oled";
+    autoHideSidebarSec: number;
+    customWallpaperUrl: string;
+  };
+  sidebarApps: SidebarAppItem[];
   homeLayout: {
-    mode: "stock-debloated" | "custom-home";
+    mode: "sidebar-launcher" | "stock-debloated";
     removeRecommendedShelf: boolean;
     removeQCardList: boolean;
     hideGlobalLine: boolean;
@@ -99,18 +125,53 @@ const APP_PRESETS = [
   { id: "spotify-beehive", label: "Spotify" },
 ];
 
+const FALL_LEAVES = [
+  { left: "14%", delay: "0s", duration: "11s", size: 12, rot: 25 },
+  { left: "28%", delay: "2.2s", duration: "13s", size: 10, rot: -40 },
+  { left: "44%", delay: "1.1s", duration: "9.5s", size: 14, rot: 15 },
+  { left: "62%", delay: "3.4s", duration: "12s", size: 11, rot: 60 },
+  { left: "78%", delay: "0.7s", duration: "10.5s", size: 13, rot: -20 },
+  { left: "89%", delay: "2.8s", duration: "14s", size: 9, rot: 45 },
+];
+
+function renderAppIcon(iconKey: string) {
+  switch (iconKey) {
+    case "youtube":
+      return <Play className="w-4 h-4 fill-current" />;
+    case "netflix":
+    case "disney":
+    case "prime":
+      return <Film className="w-4 h-4" />;
+    case "jellyfin":
+    case "plex":
+      return <Server className="w-4 h-4" />;
+    case "spotify":
+      return <Music className="w-4 h-4" />;
+    case "gamepad":
+    case "moonlight":
+      return <Gamepad2 className="w-4 h-4" />;
+    default:
+      return <Compass className="w-4 h-4" />;
+  }
+}
+
 export default function G3StudioPage() {
   const [config, setConfig] = useState<G3ModConfig | null>(null);
   const [generatedXml, setGeneratedXml] = useState<string>("");
   const [generatedKeybinds, setGeneratedKeybinds] = useState<string>("");
   const [debloatScript, setDebloatScript] = useState<string>("");
   const [previewCompareMode, setPreviewCompareMode] = useState<
-    "configured" | "stock"
-  >("configured");
+    "sidebar-seasonal" | "stock-debloated" | "stock-bloat"
+  >("sidebar-seasonal");
+  const [selectedSidebarIdx, setSelectedSidebarIdx] = useState<number>(0);
+  const [tvPowerState, setTvPowerState] = useState<"on" | "turning-on" | "launched">("on");
+  const [activeLaunchedApp, setActiveLaunchedApp] = useState<SidebarAppItem | null>(null);
+  const [inspoVideoUrl, setInspoVideoUrl] = useState<string | null>(null);
+  const [inspoVideoName, setInspoVideoName] = useState<string>("");
   const [saving, setSaving] = useState(false);
   const [running, setRunning] = useState(false);
   const [terminalLog, setTerminalLog] = useState<string>(
-    "[ready] Target: LG OLED65G3PUA @ 192.168.97.141 (webOS 25 / 10.3.0-2504)\n[ready] Exploit vector: com.webos.service.jsserver + /usr/palm/services/com.palm.service.devmode bypass\n[ready] Payload files queued: index.html, autoroot.sh, package.json, main.js, debloat_home.sh"
+    "[ready] Repo: github.com/james-lopez/lgOS-getSlopped\n[ready] Target: LG OLED65G3PUA @ 192.168.97.141 (webOS 25 / 10.3.0-2504)\n[ready] Theme: Fall & Pumpkin Harvest Turn-On + Seamless Sidebar Launcher"
   );
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
 
@@ -126,6 +187,51 @@ export default function G3StudioPage() {
         }
       });
   }, []);
+
+  const enabledApps = (config?.sidebarApps || []).filter((a) => a.enabled);
+
+  // Allow keyboard Up/Down/Enter navigation inside the interactive TV preview
+  const handleKeyDown = useCallback(
+    (e: KeyboardEvent) => {
+      if (previewCompareMode !== "sidebar-seasonal" || enabledApps.length === 0) return;
+      const tag = (e.target as HTMLElement)?.tagName;
+      if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
+
+      if (e.key === "ArrowDown") {
+        e.preventDefault();
+        setActiveLaunchedApp(null);
+        setSelectedSidebarIdx((prev) => (prev + 1) % enabledApps.length);
+      } else if (e.key === "ArrowUp") {
+        e.preventDefault();
+        setActiveLaunchedApp(null);
+        setSelectedSidebarIdx(
+          (prev) => (prev - 1 + enabledApps.length) % enabledApps.length
+        );
+      } else if (e.key === "Enter") {
+        e.preventDefault();
+        const chosen = enabledApps[selectedSidebarIdx] || enabledApps[0];
+        if (chosen) {
+          setActiveLaunchedApp(chosen);
+        }
+      } else if (e.key === "Escape" || e.key === "Backspace") {
+        setActiveLaunchedApp(null);
+      }
+    },
+    [previewCompareMode, enabledApps, selectedSidebarIdx]
+  );
+
+  useEffect(() => {
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [handleKeyDown]);
+
+  const triggerTurnOnAnimation = () => {
+    setActiveLaunchedApp(null);
+    setTvPowerState("turning-on");
+    setTimeout(() => {
+      setTvPowerState("on");
+    }, 1400);
+  };
 
   const syncConfig = async (nextConfig: G3ModConfig) => {
     setConfig(nextConfig);
@@ -145,11 +251,22 @@ export default function G3StudioPage() {
     }
   };
 
+  const moveSidebarApp = (index: number, direction: -1 | 1) => {
+    if (!config) return;
+    const list = [...config.sidebarApps];
+    const targetIndex = index + direction;
+    if (targetIndex < 0 || targetIndex >= list.length) return;
+    const temp = list[index];
+    list[index] = list[targetIndex];
+    list[targetIndex] = temp;
+    syncConfig({ ...config, sidebarApps: list });
+  };
+
   const handleRunSlopbro = async () => {
     if (!config) return;
     setRunning(true);
     setTerminalLog(
-      `[exec] Saving payload to wwwroot/debloat_home.sh and rebuilding dist/slopbro_packed.py...\n[exec] Running: python3 slopbro.py --debug --webos-version 10 ${config.tvIp}\n[wait] Connecting to wss://${config.tvIp}:3001 ...`
+      `[exec] Saving lgOS-getSlopped payload to wwwroot/debloat_home.sh and rebuilding dist/slopbro_packed.py...\n[exec] Running: python3 slopbro.py --debug --webos-version 10 ${config.tvIp}\n[wait] Connecting to wss://${config.tvIp}:3001 ...`
     );
     try {
       const res = await fetch("/api/slopbro", {
@@ -165,9 +282,11 @@ export default function G3StudioPage() {
             stderr || "(none)"
           }\n--- STDOUT ---\n${
             stdout || "(none)"
-          }\n\nNote: If running from a cloud workspace not on the 192.168.97.0/24 LAN, download the packed single-file script above and run: python3 slopbro_g3_packed.py ${
+          }\n\nNote: When you are ready to run this on your LAN (${
             config.tvIp
-          }`
+          }), download the single-file script or run from github.com/${
+            config.githubOwner
+          }/${config.repoName}.`
         );
       }
     } catch (e: unknown) {
@@ -185,91 +304,81 @@ export default function G3StudioPage() {
     setTimeout(() => setCopiedKey(null), 2000);
   };
 
+  const handleInspoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const url = URL.createObjectURL(file);
+    setInspoVideoUrl(url);
+    setInspoVideoName(file.name);
+  };
+
   if (!config) {
     return (
       <div className="min-h-screen bg-zinc-950 text-zinc-100 flex items-center justify-center">
         <div className="flex items-center gap-3 text-zinc-400">
-          <RefreshCw className="w-5 h-5 animate-spin text-emerald-400" />
-          <span>Loading OLED65G3PUA SlopBro Studio...</span>
+          <RefreshCw className="w-5 h-5 animate-spin text-orange-400" />
+          <span>Loading lgOS-getSlopped Interactive UI Playground...</span>
         </div>
       </div>
     );
   }
 
-  const isStockPreview = previewCompareMode === "stock";
-  const showRecShelf = isStockPreview || !config.homeLayout.removeRecommendedShelf;
-  const showQCards = isStockPreview || !config.homeLayout.removeQCardList;
-  const showGlobalNav = isStockPreview || !config.homeLayout.hideGlobalLine;
-  const showPromoBannerText = isStockPreview || !config.homeLayout.blankPromoText;
-  const useOledPitchBlack = !isStockPreview && config.homeLayout.oledBlackBanner;
-
-  const activePrivacyCount = Object.values(config.privacy).filter(Boolean).length;
-  const activeHomeSpeedups = [
-    config.homeLayout.removeRecommendedShelf,
-    config.homeLayout.removeQCardList,
-    config.homeLayout.hideGlobalLine,
-    config.homeLayout.hideQuickGuide,
-    config.homeLayout.blankPromoText,
-    config.homeLayout.oledBlackBanner,
-  ].filter(Boolean).length;
+  const focusedApp =
+    enabledApps[selectedSidebarIdx] || enabledApps[0] || config.sidebarApps[0];
+  const season = config.launcherTheme.activeSeason;
 
   return (
-    <div className="min-h-screen bg-zinc-950 text-zinc-100 selection:bg-emerald-500/30">
+    <div className="min-h-screen bg-zinc-950 text-zinc-100 selection:bg-orange-500/30">
       {/* Top Header Bar */}
       <header className="border-b border-zinc-800/80 bg-zinc-950/90 backdrop-blur sticky top-0 z-30">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 py-3.5 flex flex-wrap items-center justify-between gap-4">
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-emerald-500/10 border border-emerald-500/30 flex items-center justify-center text-emerald-400">
-              <Tv className="w-5 h-5" />
+            <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-orange-500/20 to-amber-500/10 border border-orange-500/40 flex items-center justify-center text-orange-400 shadow-lg shadow-orange-950/50">
+              <Flame className="w-5 h-5" />
             </div>
             <div>
-              <div className="flex items-center gap-2.5">
+              <div className="flex items-center gap-2 flex-wrap">
                 <h1 className="font-semibold text-base sm:text-lg tracking-tight text-white">
-                  SlopBro G3 Studio
+                  lgOS-getSlopped
                 </h1>
-                <Badge className="bg-emerald-500/15 text-emerald-300 border-emerald-500/30 text-xs">
-                  OLED65G3PUA
+                <Badge className="bg-orange-500/15 text-orange-300 border-orange-500/30 text-xs font-mono">
+                  github.com/{config.githubOwner}/{config.repoName}
                 </Badge>
-                <Badge
-                  variant="outline"
-                  className="border-zinc-700 text-zinc-300 text-xs font-mono"
-                >
-                  webOS 25 / 10.3.0-2504
+                <Badge className="bg-emerald-500/15 text-emerald-300 border-emerald-500/30 text-xs">
+                  OLED65G3PUA · webOS 25 (10.3.0)
                 </Badge>
               </div>
               <p className="text-xs text-zinc-400">
-                Root Exploit + Flutter Home Debloater + ACR/Ad Sinkhole for{" "}
-                <span className="font-mono text-zinc-200">{config.tvIp}</span>
+                Interactive Sidebar Launcher + Seasonal Fall/Pumpkin Turn-On Ambience + Plug-and-Play SlopBro Root Suite
               </p>
             </div>
           </div>
 
-          <div className="flex items-center gap-2.5">
-            <a href="/api/download?file=packed" download="slopbro_g3_packed.py">
+          <div className="flex items-center gap-2.5 flex-wrap">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={triggerTurnOnAnimation}
+              className="border-orange-500/40 bg-orange-950/30 hover:bg-orange-900/40 text-orange-200 gap-2"
+            >
+              <Power className="w-4 h-4 text-orange-400" />
+              Simulate TV Turn-On
+            </Button>
+            <a href="/api/download?file=packed" download="lgOS-getSlopped.py">
               <Button
                 variant="outline"
                 size="sm"
                 className="border-zinc-700 bg-zinc-900 hover:bg-zinc-800 text-zinc-100 gap-2"
               >
                 <Download className="w-4 h-4 text-emerald-400" />
-                Download Single-File (.py)
-              </Button>
-            </a>
-            <a href="/api/download?file=debloat" download="debloat_home.sh">
-              <Button
-                variant="outline"
-                size="sm"
-                className="border-zinc-700 bg-zinc-900 hover:bg-zinc-800 text-zinc-100 gap-2"
-              >
-                <Terminal className="w-4 h-4 text-cyan-400" />
-                debloat_home.sh
+                Download Plug-and-Play (.py)
               </Button>
             </a>
             <Button
               size="sm"
               onClick={handleRunSlopbro}
               disabled={running}
-              className="bg-emerald-600 hover:bg-emerald-500 text-white gap-2 font-medium"
+              className="bg-orange-600 hover:bg-orange-500 text-white gap-2 font-medium"
             >
               {running ? (
                 <RefreshCw className="w-4 h-4 animate-spin" />
@@ -283,379 +392,695 @@ export default function G3StudioPage() {
       </header>
 
       <main className="max-w-7xl mx-auto px-4 sm:px-6 py-6 space-y-6">
-        {/* Top Metrics Strip */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-          <Card className="bg-zinc-900/70 border-zinc-800">
-            <CardContent className="p-4 flex items-center justify-between">
-              <div>
-                <p className="text-xs text-zinc-400 uppercase tracking-wider">
-                  Target Television
-                </p>
-                <p className="text-lg font-semibold font-mono text-white mt-0.5">
-                  {config.tvIp}
-                </p>
-                <p className="text-xs text-emerald-400 mt-1">
-                  Flutter Home Engine (webOS 10.3.0)
-                </p>
-              </div>
-              <Tv className="w-8 h-8 text-zinc-700" />
-            </CardContent>
-          </Card>
-
-          <Card className="bg-zinc-900/70 border-zinc-800">
-            <CardContent className="p-4 flex items-center justify-between">
-              <div>
-                <p className="text-xs text-zinc-400 uppercase tracking-wider">
-                  Home UI Speedup
-                </p>
-                <p className="text-lg font-semibold text-white mt-0.5">
-                  {activeHomeSpeedups} / 6 Optimizations
-                </p>
-                <p className="text-xs text-cyan-400 mt-1">
-                  {config.homeLayout.mode === "stock-debloated"
-                    ? "Bind-Mount XML Overlay"
-                    : "Custom Home Replacement"}
-                </p>
-              </div>
-              <Zap className="w-8 h-8 text-cyan-500/40" />
-            </CardContent>
-          </Card>
-
-          <Card className="bg-zinc-900/70 border-zinc-800">
-            <CardContent className="p-4 flex items-center justify-between">
-              <div>
-                <p className="text-xs text-zinc-400 uppercase tracking-wider">
-                  Ad & ACR Armor
-                </p>
-                <p className="text-lg font-semibold text-white mt-0.5">
-                  {activePrivacyCount} / 8 Shields Active
-                </p>
-                <p className="text-xs text-emerald-400 mt-1">
-                  28 LG Ad/ACR Domains Sinkholed
-                </p>
-              </div>
-              <ShieldCheck className="w-8 h-8 text-emerald-500/40" />
-            </CardContent>
-          </Card>
-
-          <Card className="bg-zinc-900/70 border-zinc-800">
-            <CardContent className="p-4 flex items-center justify-between">
-              <div>
-                <p className="text-xs text-zinc-400 uppercase tracking-wider">
-                  Filesystem Safety
-                </p>
-                <p className="text-lg font-semibold text-white mt-0.5">
-                  100% Reversible
-                </p>
-                <p className="text-xs text-amber-400 mt-1">
-                  RAM /tmp Overlay + init.d Hook
-                </p>
-              </div>
-              <Lock className="w-8 h-8 text-amber-500/40" />
-            </CardContent>
-          </Card>
-        </div>
-
         {/* Main Two-Column Layout */}
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
-          {/* Left 7 Columns: Live OLED65G3PUA TV Simulator + Execution Console */}
+          {/* Left 7 Columns: Interactive OLED65G3PUA TV Simulator + Remote + Inspo Video Compare */}
           <div className="lg:col-span-7 space-y-6">
-            <Card className="bg-zinc-900/80 border-zinc-800 overflow-hidden">
-              <CardHeader className="pb-3 border-b border-zinc-800/80 flex flex-row items-center justify-between">
+            <Card className="bg-zinc-900/80 border-zinc-800 overflow-hidden shadow-2xl">
+              <CardHeader className="pb-3 border-b border-zinc-800/80 flex flex-row flex-wrap items-center justify-between gap-2">
                 <div>
                   <CardTitle className="text-base text-white flex items-center gap-2">
-                    <Eye className="w-4 h-4 text-emerald-400" />
-                    Live OLED65G3PUA Screen Preview (webOS 10.3.0 Flutter Home)
+                    <Sparkles className="w-4 h-4 text-orange-400" />
+                    Interactive OLED65G3PUA Launcher Playground
                   </CardTitle>
                   <CardDescription className="text-xs text-zinc-400">
-                    Real-time visual simulation of{" "}
-                    <code className="text-zinc-300">
-                      /usr/palm/applications/com.webos.app.home/data/flutter_assets/assets/home.xml
-                    </code>
+                    Use <kbd className="px-1.5 py-0.5 bg-zinc-800 rounded text-zinc-200">↑</kbd>{" "}
+                    <kbd className="px-1.5 py-0.5 bg-zinc-800 rounded text-zinc-200">↓</kbd>{" "}
+                    <kbd className="px-1.5 py-0.5 bg-zinc-800 rounded text-zinc-200">Enter</kbd>{" "}
+                    or click any app in the sidebar to test navigation & turn-on feel
                   </CardDescription>
                 </div>
-                <div className="flex items-center gap-1.5 bg-zinc-950 p-1 rounded-lg border border-zinc-800">
+
+                <div className="flex items-center gap-1 bg-zinc-950 p-1 rounded-lg border border-zinc-800">
                   <button
                     type="button"
-                    onClick={() => setPreviewCompareMode("configured")}
+                    onClick={() => setPreviewCompareMode("sidebar-seasonal")}
                     className={`px-2.5 py-1 rounded text-xs font-medium transition ${
-                      previewCompareMode === "configured"
+                      previewCompareMode === "sidebar-seasonal"
+                        ? "bg-orange-600 text-white"
+                        : "text-zinc-400 hover:text-white"
+                    }`}
+                  >
+                    Sidebar + Fall Theme
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setPreviewCompareMode("stock-debloated")}
+                    className={`px-2.5 py-1 rounded text-xs font-medium transition ${
+                      previewCompareMode === "stock-debloated"
                         ? "bg-emerald-600 text-white"
                         : "text-zinc-400 hover:text-white"
                     }`}
                   >
-                    Debloated G3
+                    Minimal Bottom Bar
                   </button>
                   <button
                     type="button"
-                    onClick={() => setPreviewCompareMode("stock")}
+                    onClick={() => setPreviewCompareMode("stock-bloat")}
                     className={`px-2.5 py-1 rounded text-xs font-medium transition ${
-                      previewCompareMode === "stock"
+                      previewCompareMode === "stock-bloat"
                         ? "bg-rose-600 text-white"
                         : "text-zinc-400 hover:text-white"
                     }`}
                   >
-                    Stock webOS 25 (Bloat)
+                    Stock webOS 25
                   </button>
                 </div>
               </CardHeader>
 
               <CardContent className="p-5">
-                {/* 16:9 OLED TV Bezel */}
-                <div className="relative aspect-video w-full rounded-xl border-4 border-zinc-800 bg-black shadow-2xl overflow-hidden flex flex-col justify-between p-4 select-none">
-                  {config.homeLayout.mode === "custom-home" && !isStockPreview ? (
-                    /* Custom Home Launcher Preview */
-                    <div className="flex-1 flex flex-col justify-between bg-black text-white p-4">
-                      <div className="flex items-center justify-between text-xs text-zinc-400">
-                        <span className="font-mono text-emerald-400">
-                          tld.my.customhome (HOME Key 773 Intercept Active)
-                        </span>
-                        <span>68°F · Clear Sky</span>
+                {/* 16:9 LG OLED65G3PUA Bezel */}
+                <div className="relative aspect-video w-full rounded-xl border-[5px] border-zinc-800 bg-black shadow-2xl overflow-hidden select-none">
+                  {/* Turn-On OLED Curtain Transition */}
+                  {tvPowerState === "turning-on" && (
+                    <div className="absolute inset-0 z-40 bg-black flex flex-col items-center justify-center animate-pulse">
+                      <div className="w-20 h-20 rounded-full bg-orange-500/20 border border-orange-500/40 flex items-center justify-center mb-3">
+                        <Flame className="w-10 h-10 text-orange-400" />
                       </div>
-                      <div className="my-auto text-center space-y-2">
-                        <div className="text-5xl font-light tracking-widest text-white">
-                          09:42
-                        </div>
-                        <div className="text-xs uppercase tracking-widest text-zinc-500">
-                          OLED Pure Black Minimal Launcher · 0 Ads · 0 Telemetry
-                        </div>
-                      </div>
-                      <div className="grid grid-cols-6 gap-2.5 pt-4">
-                        {[
-                          { name: "HDMI 1 (PS5)", color: "bg-blue-950/70 border-blue-700/50" },
-                          { name: "YouTube AdFree", color: "bg-red-950/70 border-red-700/50" },
-                          { name: "Jellyfin", color: "bg-purple-950/70 border-purple-700/50" },
-                          { name: "Plex", color: "bg-amber-950/70 border-amber-700/50" },
-                          { name: "Moonlight", color: "bg-emerald-950/70 border-emerald-700/50" },
-                          { name: "Homebrew", color: "bg-zinc-900 border-zinc-700" },
-                        ].map((app) => (
+                      <p className="text-sm font-medium tracking-widest uppercase text-orange-200">
+                        OLED65G3PUA · Warming Up Fall Harvest Scene...
+                      </p>
+                      <p className="text-[11px] font-mono text-zinc-500 mt-1">
+                        0 Ads · 0 Telemetry · Instant Sidebar Ready
+                      </p>
+                    </div>
+                  )}
+
+                  {previewCompareMode === "sidebar-seasonal" ? (
+                    /* =========================================================
+                       MODE 1: SEAMLESS SIDEBAR + SEASONAL FALL & PUMPKIN SCENE
+                       ========================================================= */
+                    <div className="relative w-full h-full flex overflow-hidden">
+                      {/* Seasonal Background Layer */}
+                      {season === "fall-pumpkin" && (
+                        <div className="absolute inset-0 bg-gradient-to-br from-[#120703] via-[#261005] to-[#090402]">
+                          {/* Warm Autumn Moon & Lantern Glows */}
                           <div
-                            key={app.name}
-                            className={`rounded-lg border p-2.5 text-center text-xs font-medium ${app.color}`}
+                            className="absolute -top-16 right-12 w-72 h-72 rounded-full opacity-40 blur-3xl pointer-events-none"
+                            style={{
+                              background:
+                                "radial-gradient(circle, rgba(249,115,22,0.65) 0%, rgba(180,83,9,0.2) 60%, transparent 100%)",
+                            }}
+                          />
+                          <div
+                            className="absolute bottom-0 right-1/4 w-96 h-56 rounded-full opacity-35 blur-3xl pointer-events-none"
+                            style={{
+                              background:
+                                "radial-gradient(circle, rgba(245,158,11,0.5) 0%, rgba(124,45,18,0.15) 70%, transparent 100%)",
+                            }}
+                          />
+
+                          {/* Vector Autumn Hills, Forest & Glowing Pumpkins SVG */}
+                          <svg
+                            viewBox="0 0 1200 675"
+                            className="absolute inset-0 w-full h-full object-cover pointer-events-none opacity-90"
+                            preserveAspectRatio="xMidYMid slice"
                           >
-                            {app.name}
+                            <defs>
+                              <radialGradient id="harvestMoon" cx="78%" cy="22%" r="16%">
+                                <stop offset="0%" stopColor="#fde68a" stopOpacity="0.95" />
+                                <stop offset="45%" stopColor="#f97316" stopOpacity="0.45" />
+                                <stop offset="100%" stopColor="#f97316" stopOpacity="0" />
+                              </radialGradient>
+                              <linearGradient id="hillBack" x1="0" y1="0" x2="0" y2="1">
+                                <stop offset="0%" stopColor="#2e1307" />
+                                <stop offset="100%" stopColor="#140803" />
+                              </linearGradient>
+                              <linearGradient id="hillFront" x1="0" y1="0" x2="0" y2="1">
+                                <stop offset="0%" stopColor="#1c0b04" />
+                                <stop offset="100%" stopColor="#080301" />
+                              </linearGradient>
+                              <radialGradient id="pumpkinGlow" cx="50%" cy="50%" r="50%">
+                                <stop offset="0%" stopColor="#fef08a" />
+                                <stop offset="60%" stopColor="#f97316" />
+                                <stop offset="100%" stopColor="#9a3412" />
+                              </radialGradient>
+                            </defs>
+
+                            {/* Harvest Moon */}
+                            <circle cx="930" cy="150" r="175" fill="url(#harvestMoon)" />
+                            <circle cx="930" cy="150" r="52" fill="#fef3c7" fillOpacity="0.88" />
+
+                            {/* Distant Autumn Hills */}
+                            <path
+                              d="M0,470 Q320,380 650,455 T1200,420 L1200,675 L0,675 Z"
+                              fill="url(#hillBack)"
+                            />
+                            {/* Foreground Silhouette Ridge */}
+                            <path
+                              d="M0,535 Q420,470 820,530 T1200,505 L1200,675 L0,675 Z"
+                              fill="url(#hillFront)"
+                            />
+
+                            {/* Warm Glowing Jack-O'-Lantern / Pumpkins Cluster on Right Ridge */}
+                            {/* Large Main Pumpkin */}
+                            <g transform="translate(880, 485)">
+                              <ellipse cx="0" cy="48" rx="68" ry="14" fill="#000" opacity="0.55" />
+                              <path
+                                d="M-10,-32 Q-4,-48 8,-44 Q4,-30 6,-22 Z"
+                                fill="#3f230f"
+                              />
+                              <ellipse cx="-24" cy="10" rx="28" ry="34" fill="#c2410c" />
+                              <ellipse cx="24" cy="10" rx="28" ry="34" fill="#c2410c" />
+                              <ellipse cx="-12" cy="12" rx="26" ry="36" fill="#ea580c" />
+                              <ellipse cx="12" cy="12" rx="26" ry="36" fill="#ea580c" />
+                              <ellipse cx="0" cy="12" rx="22" ry="37" fill="#f97316" />
+                              {/* Warm Carved Eyes & Smile Glow */}
+                              <polygon points="-18,2 -8,-10 -2,2" fill="url(#pumpkinGlow)" />
+                              <polygon points="18,2 8,-10 2,2" fill="url(#pumpkinGlow)" />
+                              <path
+                                d="M-22,18 Q0,34 22,18 Q12,24 0,24 Q-12,24 -22,18 Z"
+                                fill="url(#pumpkinGlow)"
+                              />
+                            </g>
+
+                            {/* Second Cozy Pumpkin */}
+                            <g transform="translate(975, 512) scale(0.72)">
+                              <ellipse cx="0" cy="45" rx="52" ry="11" fill="#000" opacity="0.5" />
+                              <path
+                                d="M-6,-28 Q0,-42 10,-38 Q5,-26 6,-18 Z"
+                                fill="#3f230f"
+                              />
+                              <ellipse cx="-18" cy="10" rx="24" ry="30" fill="#9a3412" />
+                              <ellipse cx="18" cy="10" rx="24" ry="30" fill="#9a3412" />
+                              <ellipse cx="0" cy="11" rx="24" ry="32" fill="#d97706" />
+                            </g>
+
+                            {/* Third Small Gourd */}
+                            <g transform="translate(805, 520) scale(0.58)">
+                              <ellipse cx="0" cy="42" rx="45" ry="10" fill="#000" opacity="0.5" />
+                              <ellipse cx="-15" cy="10" rx="22" ry="28" fill="#b45309" />
+                              <ellipse cx="15" cy="10" rx="22" ry="28" fill="#b45309" />
+                              <ellipse cx="0" cy="11" rx="20" ry="29" fill="#f59e0b" />
+                            </g>
+                          </svg>
+
+                          {/* Floating Autumn Leaves & Embers */}
+                          {config.launcherTheme.ambientParticles &&
+                            FALL_LEAVES.map((leaf, i) => (
+                              <div
+                                key={i}
+                                className="absolute pointer-events-none text-orange-400/50 animate-pulse"
+                                style={{
+                                  left: leaf.left,
+                                  top: `${18 + ((i * 13) % 55)}%`,
+                                  transform: `rotate(${leaf.rot}deg)`,
+                                }}
+                              >
+                                <span
+                                  className="inline-block rounded-tl-full rounded-br-full bg-gradient-to-br from-orange-400/70 to-amber-600/40 shadow-sm shadow-orange-500/30"
+                                  style={{
+                                    width: `${leaf.size}px`,
+                                    height: `${leaf.size}px`,
+                                  }}
+                                />
+                              </div>
+                            ))}
+                        </div>
+                      )}
+
+                      {season === "winter-aurora" && (
+                        <div className="absolute inset-0 bg-gradient-to-br from-[#020813] via-[#061c2e] to-[#020409]" />
+                      )}
+
+                      {season === "midnight-oled" && (
+                        <div className="absolute inset-0 bg-black" />
+                      )}
+
+                      {/* Main Layout Container (Left or Right Sidebar) */}
+                      <div
+                        className={`relative z-10 w-full h-full flex ${
+                          config.launcherTheme.sidebarPosition === "right"
+                            ? "flex-row-reverse"
+                            : "flex-row"
+                        }`}
+                      >
+                        {/* SEAMLESS SIDEBAR DOCK */}
+                        <div
+                          className={`w-64 sm:w-72 h-full flex flex-col justify-between p-3.5 transition-all ${
+                            config.launcherTheme.sidebarStyle === "pure-oled"
+                              ? "bg-black/95 border-r border-zinc-900"
+                              : "bg-black/65 backdrop-blur-xl border-r border-orange-500/20"
+                          }`}
+                        >
+                          {/* Sidebar Header */}
+                          <div className="flex items-center justify-between px-2 pt-1 pb-2 border-b border-white/10">
+                            <div className="flex items-center gap-2">
+                              <span className="w-2.5 h-2.5 rounded-full bg-orange-400 shadow-sm shadow-orange-400" />
+                              <span className="text-xs font-semibold tracking-wide text-orange-100">
+                                Quick Apps
+                              </span>
+                            </div>
+                            <span className="text-[10px] font-mono text-orange-300/80">
+                              HOME · 773
+                            </span>
+                          </div>
+
+                          {/* Major Apps Vertical Rail */}
+                          <div className="my-2 flex-1 space-y-1 overflow-y-auto pr-1">
+                            {enabledApps.map((app, idx) => {
+                              const isSelected = idx === selectedSidebarIdx;
+                              return (
+                                <button
+                                  key={app.id}
+                                  type="button"
+                                  onClick={() => {
+                                    setSelectedSidebarIdx(idx);
+                                    setActiveLaunchedApp(null);
+                                  }}
+                                  onDoubleClick={() => setActiveLaunchedApp(app)}
+                                  className={`w-full flex items-center gap-3 px-2.5 py-2 rounded-xl text-left transition-all duration-150 ${
+                                    isSelected
+                                      ? "bg-gradient-to-r from-orange-500/30 via-amber-500/15 to-transparent border border-orange-400/60 shadow-lg shadow-orange-950/60 scale-[1.01]"
+                                      : "hover:bg-white/5 border border-transparent text-zinc-400"
+                                  }`}
+                                >
+                                  <div
+                                    className="w-7 h-7 rounded-lg flex items-center justify-center shrink-0 text-white shadow"
+                                    style={{
+                                      backgroundColor: isSelected
+                                        ? app.accentColor
+                                        : "rgba(39,39,42,0.85)",
+                                    }}
+                                  >
+                                    {renderAppIcon(app.iconKey)}
+                                  </div>
+                                  <div className="min-w-0 flex-1">
+                                    <div
+                                      className={`text-xs font-medium truncate ${
+                                        isSelected ? "text-white" : "text-zinc-300"
+                                      }`}
+                                    >
+                                      {app.name}
+                                    </div>
+                                    <div className="text-[10px] text-zinc-400 truncate">
+                                      {app.subtitle}
+                                    </div>
+                                  </div>
+                                  {isSelected && (
+                                    <span className="text-[9px] font-mono px-1.5 py-0.5 rounded bg-orange-500/20 text-orange-200 border border-orange-400/30">
+                                      OK
+                                    </span>
+                                  )}
+                                </button>
+                              );
+                            })}
+                          </div>
+
+                          {/* Sidebar Footer Status */}
+                          <div className="pt-2 border-t border-white/10 flex items-center justify-between px-2 text-[10px] text-zinc-400">
+                            <span>eARC: Atmos Ready</span>
+                            <span className="text-emerald-400 font-mono">
+                              ACR/Ads: 0
+                            </span>
+                          </div>
+                        </div>
+
+                        {/* RIGHT AMBIENT CANVAS STAGE */}
+                        <div className="flex-1 h-full flex flex-col justify-between p-6 relative">
+                          {/* Top Clock & Autumn Weather Pill */}
+                          <div className="flex items-start justify-between">
+                            <div className="space-y-0.5">
+                              <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-orange-950/60 border border-orange-500/30 text-[10px] text-orange-200">
+                                <Flame className="w-3 h-3 text-orange-400" />
+                                <span>{config.launcherTheme.greetingTitle}</span>
+                              </div>
+                              <p className="text-[11px] text-orange-100/70 pl-1 pt-0.5">
+                                {config.launcherTheme.greetingSubtitle}
+                              </p>
+                            </div>
+
+                            <div className="text-right bg-black/45 backdrop-blur-md px-3.5 py-2 rounded-xl border border-white/10">
+                              <div className="text-2xl font-light tracking-wider text-amber-50">
+                                8:45 PM
+                              </div>
+                              <div className="text-[10px] text-orange-200/80">
+                                Oct 20 · 54°F Crisp Autumn Night
+                              </div>
+                            </div>
+                          </div>
+
+                          {/* Center / Bottom Focused App Card or Launched App View */}
+                          {activeLaunchedApp ? (
+                            <div className="my-auto mx-auto w-full max-w-md rounded-2xl bg-black/80 backdrop-blur-xl border border-orange-400/50 p-5 text-center space-y-3 shadow-2xl">
+                              <div
+                                className="w-12 h-12 rounded-2xl mx-auto flex items-center justify-center text-white shadow-lg"
+                                style={{
+                                  backgroundColor: activeLaunchedApp.accentColor,
+                                }}
+                              >
+                                {renderAppIcon(activeLaunchedApp.iconKey)}
+                              </div>
+                              <div>
+                                <p className="text-xs font-mono uppercase tracking-widest text-orange-300">
+                                  luna://com.webos.applicationManager/launch
+                                </p>
+                                <h3 className="text-lg font-semibold text-white mt-0.5">
+                                  Launching {activeLaunchedApp.name}...
+                                </h3>
+                                <p className="text-xs text-zinc-400 font-mono mt-0.5">
+                                  appId: &quot;{activeLaunchedApp.id}&quot;
+                                </p>
+                              </div>
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                onClick={() => setActiveLaunchedApp(null)}
+                                className="border-zinc-700 bg-zinc-900 text-xs text-zinc-200"
+                              >
+                                Press HOME (Back to Sidebar)
+                              </Button>
+                            </div>
+                          ) : (
+                            focusedApp && (
+                              <div className="mt-auto max-w-md rounded-2xl bg-black/55 backdrop-blur-md border border-orange-400/25 p-4 flex items-center justify-between gap-4 shadow-xl">
+                                <div className="flex items-center gap-3.5">
+                                  <div
+                                    className="w-11 h-11 rounded-xl flex items-center justify-center text-white shadow-md shrink-0"
+                                    style={{
+                                      backgroundColor: focusedApp.accentColor,
+                                    }}
+                                  >
+                                    {renderAppIcon(focusedApp.iconKey)}
+                                  </div>
+                                  <div>
+                                    <div className="flex items-center gap-2">
+                                      <span className="text-sm font-semibold text-white">
+                                        {focusedApp.name}
+                                      </span>
+                                      <Badge
+                                        variant="outline"
+                                        className="text-[10px] border-orange-400/30 text-orange-200"
+                                      >
+                                        {focusedApp.category}
+                                      </Badge>
+                                    </div>
+                                    <p className="text-xs text-zinc-300 mt-0.5">
+                                      {focusedApp.subtitle}
+                                    </p>
+                                    <p className="text-[10px] font-mono text-zinc-400 mt-0.5">
+                                      ID: {focusedApp.id}
+                                    </p>
+                                  </div>
+                                </div>
+                                <Button
+                                  size="sm"
+                                  onClick={() => setActiveLaunchedApp(focusedApp)}
+                                  className="bg-orange-600 hover:bg-orange-500 text-white text-xs shrink-0"
+                                >
+                                  Launch
+                                </Button>
+                              </div>
+                            )
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  ) : previewCompareMode === "stock-debloated" ? (
+                    /* =========================================================
+                       MODE 2: DEBLOATED NATIVE BOTTOM BAR (home.xml OVERLAY)
+                       ========================================================= */
+                    <div className="w-full h-full flex flex-col justify-between p-5 bg-black">
+                      <div className="flex items-center justify-between text-xs text-zinc-500 font-mono">
+                        <span>webOS 10.3.0 Flutter Home (home.xml Stripped Overlay)</span>
+                        <span>globalline: 0x0 · recommendedShelf: removed</span>
+                      </div>
+                      <div className="my-auto text-center text-xs font-mono text-zinc-600">
+                        [Pure OLED Pitch-Black Canvas — Only Bottom App Bar Active]
+                      </div>
+                      <div className="grid grid-cols-7 gap-2">
+                        {enabledApps.slice(0, 7).map((app, idx) => (
+                          <div
+                            key={app.id}
+                            className={`rounded-lg p-2.5 text-center border ${
+                              idx === 0
+                                ? "bg-zinc-900 border-emerald-400"
+                                : "bg-zinc-950 border-zinc-800"
+                            }`}
+                          >
+                            <div className="text-[11px] font-medium text-white truncate">
+                              {app.name}
+                            </div>
+                            <div className="text-[9px] text-zinc-500 truncate mt-0.5">
+                              {app.category}
+                            </div>
                           </div>
                         ))}
                       </div>
                     </div>
                   ) : (
-                    /* Stock vs Debloated Flutter Home Preview */
-                    <>
-                      {/* Top Area / Hero Banner + GlobalLine */}
-                      <div
-                        className={`relative rounded-lg transition-all duration-300 flex flex-col justify-between p-4 ${
-                          useOledPitchBlack
-                            ? "bg-black border border-zinc-900/80 flex-1"
-                            : "bg-gradient-to-r from-indigo-950 via-purple-950 to-rose-950 border border-purple-700/30 h-32"
-                        }`}
-                      >
-                        <div className="flex items-start justify-between">
-                          <div className="flex items-center gap-2">
-                            <Badge
-                              variant="outline"
-                              className={`text-[10px] ${
-                                useOledPitchBlack
-                                  ? "border-emerald-500/40 text-emerald-400 bg-emerald-950/30"
-                                  : "border-rose-400/40 text-rose-200 bg-rose-950/40"
-                              }`}
-                            >
-                              {useOledPitchBlack
-                                ? "OLED Pitch-Black (0% Pixel Draw)"
-                                : "Hero Ad Banner (3840x900)"}
-                            </Badge>
-                          </div>
-
-                          {showGlobalNav ? (
-                            <div className="flex items-center gap-1.5 bg-black/50 px-2.5 py-1 rounded-full border border-white/10 text-[10px] text-zinc-300">
-                              <span>Search</span>
-                              <span>·</span>
-                              <span>Profile</span>
-                              <span>·</span>
-                              <span>Notifications</span>
-                              <span>·</span>
-                              <span className="text-rose-400">globalline</span>
-                            </div>
-                          ) : (
-                            <span className="text-[10px] font-mono text-zinc-600">
-                              globalline: 0x0 (hidden)
-                            </span>
-                          )}
+                    /* =========================================================
+                       MODE 3: STOCK UNMODIFIED WEBOS 25 (WITH BLOAT & ADS)
+                       ========================================================= */
+                    <div className="w-full h-full flex flex-col justify-between p-4 bg-zinc-950">
+                      <div className="h-28 rounded-lg bg-gradient-to-r from-indigo-950 via-purple-950 to-rose-950 border border-rose-500/40 p-3 flex flex-col justify-between">
+                        <div className="flex justify-between text-[10px] text-rose-200">
+                          <span>SPONSORED BANNER AD (lgad.cjpowercast.com)</span>
+                          <span>Search · Profile · Notifications · globalline</span>
                         </div>
-
-                        {showPromoBannerText ? (
-                          <div className="space-y-1 my-auto">
-                            <p className="text-sm font-semibold text-white">
-                              SPONSORED: Watch Live Sports & ShopTime Deals on LG Channels!
-                            </p>
-                            <div className="inline-block text-[10px] bg-white text-black px-2 py-0.5 rounded font-medium">
-                              Start a new experience with webOS · Go to Apps
+                        <div className="text-xs font-semibold text-white">
+                          Watch Live Shopping & Sponsored Channels Now!
+                        </div>
+                      </div>
+                      <div className="grid grid-cols-5 gap-2">
+                        {["ShopTime", "LG Channels", "Sports Alert", "Home Hub", "Game Card"].map(
+                          (q) => (
+                            <div
+                              key={q}
+                              className="p-2 rounded bg-zinc-900 border border-rose-500/30 text-[10px] text-zinc-300"
+                            >
+                              {q} (Q-Card)
                             </div>
-                          </div>
-                        ) : (
-                          <div className="my-auto flex flex-col items-center justify-center text-center">
-                            <span className="text-xs font-mono text-zinc-600">
-                              [Pure Black Canvas — Promo Strings Stripped & Ad Servers Sinkholed]
-                            </span>
-                          </div>
+                          )
                         )}
                       </div>
-
-                      {/* Middle Q-Card List */}
-                      {showQCards && (
-                        <div className="grid grid-cols-5 gap-2 my-2">
-                          {[
-                            "Home Office",
-                            "Game Optimizer",
-                            "Music",
-                            "Home Hub",
-                            "Sports Alert (Bloat)",
-                          ].map((qcard) => (
-                            <div
-                              key={qcard}
-                              className="rounded bg-zinc-900/90 border border-rose-500/30 px-2 py-2 text-[11px] text-zinc-300 flex items-center justify-between"
-                            >
-                              <span className="truncate">{qcard}</span>
-                              <span className="text-[9px] text-rose-400 font-mono">
-                                QCard
-                              </span>
-                            </div>
-                          ))}
-                        </div>
-                      )}
-
-                      {/* App Bar (appList) */}
-                      <div className="mt-2">
-                        <div className="flex items-center justify-between mb-1">
-                          <span className="text-[10px] font-mono text-emerald-400">
-                            appList (autoFocus=&quot;true&quot; · Instant D-Pad Response)
-                          </span>
-                          <span className="text-[10px] font-mono text-zinc-500">
-                            height: {config.homeLayout.appListHeight}px
-                          </span>
-                        </div>
-                        <div className="grid grid-cols-7 gap-2">
-                          {[
-                            { name: "YouTube AdFree", badge: "Clean" },
-                            { name: "Jellyfin", badge: "Media" },
-                            { name: "Plex", badge: "Media" },
-                            { name: "HDMI 1 (PS5)", badge: "2.1" },
-                            { name: "Moonlight", badge: "120Hz" },
-                            { name: "Netflix", badge: "App" },
-                            { name: "Homebrew", badge: "Root" },
-                          ].map((app, idx) => (
-                            <div
-                              key={app.name}
-                              className={`rounded-lg p-2 text-center border transition ${
-                                idx === 0
-                                  ? "bg-zinc-800 border-emerald-400 ring-2 ring-emerald-500/30"
-                                  : "bg-zinc-900/90 border-zinc-800"
-                              }`}
-                            >
-                              <div className="text-[11px] font-medium text-white truncate">
-                                {app.name}
-                              </div>
-                              <div className="text-[9px] text-zinc-400 mt-0.5">
-                                {app.badge}
-                              </div>
-                            </div>
-                          ))}
-                        </div>
+                      <div className="h-24 rounded-lg bg-rose-950/30 border border-rose-500/40 p-2.5 text-[11px] text-rose-200">
+                        recommendedShelf (531px Tall · Dynamic Ad Rows & Telemetry)
                       </div>
-
-                      {/* Bottom Recommended Shelf (Bloat) */}
-                      {showRecShelf && (
-                        <div className="mt-2 rounded-lg bg-rose-950/30 border border-rose-500/40 p-2.5">
-                          <div className="flex items-center justify-between text-[10px] text-rose-300 mb-1.5">
-                            <span className="font-semibold">
-                              recommendedShelf (531px Tall · Loaded from lgad.cjpowercast.com)
-                            </span>
-                            <span className="font-mono">Heavy GPU/Network Lag</span>
-                          </div>
-                          <div className="grid grid-cols-4 gap-2">
-                            {[
-                              "Trending Now Ad #1",
-                              "LG Channels Live Ad",
-                              "ShopTime Promo",
-                              "Sponsored Partner",
-                            ].map((ad) => (
-                              <div
-                                key={ad}
-                                className="h-10 rounded bg-rose-950/60 border border-rose-700/40 flex items-center justify-center text-[10px] text-rose-200"
-                              >
-                                {ad}
-                              </div>
-                            ))}
-                          </div>
-                        </div>
-                      )}
-                    </>
+                    </div>
                   )}
                 </div>
 
-                {/* Comparison Legend */}
-                <div className="mt-3 flex flex-wrap items-center justify-between gap-2 text-xs text-zinc-400">
-                  <div className="flex items-center gap-4">
-                    <span className="flex items-center gap-1.5">
-                      <span className="w-2 h-2 rounded-full bg-emerald-400" />
-                      Cold-Press Home Latency:{" "}
-                      <strong className="text-white">
-                        {isStockPreview ? "~1.8s (Network + Shelf Fetch)" : "< 0.25s (Local App Bar Only)"}
-                      </strong>
+                {/* Interactive D-Pad Remote Bar under the TV */}
+                <div className="mt-3 flex flex-wrap items-center justify-between gap-3 bg-zinc-950/90 border border-zinc-800 rounded-xl px-3.5 py-2.5">
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs text-zinc-400 font-medium">
+                      Test Remote Control:
                     </span>
-                    <span className="flex items-center gap-1.5">
-                      <span className="w-2 h-2 rounded-full bg-cyan-400" />
-                      OLED APL (Average Picture Level):{" "}
-                      <strong className="text-white">
-                        {isStockPreview ? "~42%" : useOledPitchBlack ? "~4% (Near Zero Power)" : "~18%"}
-                      </strong>
-                    </span>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="h-7 px-2.5 text-xs bg-zinc-900 border-zinc-700 text-zinc-200 gap-1"
+                      onClick={() => {
+                        setActiveLaunchedApp(null);
+                        setSelectedSidebarIdx(
+                          (prev) =>
+                            (prev - 1 + enabledApps.length) %
+                            Math.max(1, enabledApps.length)
+                        );
+                      }}
+                    >
+                      <ChevronUp className="w-3.5 h-3.5" /> Up
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="h-7 px-2.5 text-xs bg-zinc-900 border-zinc-700 text-zinc-200 gap-1"
+                      onClick={() => {
+                        setActiveLaunchedApp(null);
+                        setSelectedSidebarIdx(
+                          (prev) =>
+                            (prev + 1) % Math.max(1, enabledApps.length)
+                        );
+                      }}
+                    >
+                      <ChevronDown className="w-3.5 h-3.5" /> Down
+                    </Button>
+                    <Button
+                      size="sm"
+                      className="h-7 px-3 text-xs bg-orange-600 hover:bg-orange-500 text-white"
+                      onClick={() => {
+                        if (focusedApp) setActiveLaunchedApp(focusedApp);
+                      }}
+                    >
+                      OK / Launch
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="h-7 px-2.5 text-xs bg-zinc-900 border-zinc-700 text-zinc-300"
+                      onClick={() => {
+                        setPreviewCompareMode("sidebar-seasonal");
+                        setActiveLaunchedApp(null);
+                      }}
+                    >
+                      HOME (773)
+                    </Button>
                   </div>
-                  {saving && (
-                    <span className="text-emerald-400 font-mono">
-                      Saving to wwwroot/debloat_home.sh...
-                    </span>
-                  )}
+
+                  <div className="text-xs text-zinc-400">
+                    {saving ? (
+                      <span className="text-orange-400 font-mono">
+                        Syncing payload...
+                      </span>
+                    ) : (
+                      <span>
+                        Focused:{" "}
+                        <strong className="text-orange-300">
+                          {focusedApp?.name || "None"}
+                        </strong>
+                      </span>
+                    )}
+                  </div>
                 </div>
               </CardContent>
             </Card>
 
-            {/* Generated Scripts & SlopBro Terminal Card */}
+            {/* Inspiration Video Dropzone + Phone Remote Session Control Helper */}
             <Card className="bg-zinc-900/80 border-zinc-800">
               <CardHeader className="pb-3 border-b border-zinc-800/80">
                 <CardTitle className="text-base text-white flex items-center gap-2">
-                  <Terminal className="w-4 h-4 text-cyan-400" />
-                  SlopBro Execution & Generated Payload Inspector
+                  <Smartphone className="w-4 h-4 text-orange-400" />
+                  Phone Inspiration Video Upload & Side-by-Side Reference
                 </CardTitle>
                 <CardDescription className="text-xs text-zinc-400">
-                  Run directly against <code className="text-zinc-200">{config.tvIp}</code> or inspect the generated{" "}
-                  <code className="text-zinc-200">home.xml</code>,{" "}
-                  <code className="text-zinc-200">keybinds.json</code>, and{" "}
-                  <code className="text-zinc-200">debloat_home.sh</code>
+                  Attach your inspiration video directly in the Cursor chat from your phone, or drop it right here to compare side-by-side with the TV simulator above.
                 </CardDescription>
               </CardHeader>
-              <CardContent className="p-4">
-                <Tabs defaultValue="console">
+              <CardContent className="p-4 space-y-4">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <label className="cursor-pointer rounded-xl border-2 border-dashed border-zinc-700 hover:border-orange-500/60 bg-zinc-950/70 p-4 flex flex-col items-center justify-center text-center transition">
+                    <Upload className="w-6 h-6 text-orange-400 mb-2" />
+                    <span className="text-xs font-medium text-white">
+                      Drop or Select Inspiration Video / Image (.mp4, .mov, .webm, .png)
+                    </span>
+                    <span className="text-[11px] text-zinc-400 mt-1">
+                      {inspoVideoName
+                        ? `Loaded: ${inspoVideoName}`
+                        : "Test locally in the studio or attach in Cursor chat so the agent can inspect every frame"}
+                    </span>
+                    <input
+                      type="file"
+                      accept="video/*,image/*"
+                      onChange={handleInspoUpload}
+                      className="hidden"
+                    />
+                  </label>
+
+                  <div className="rounded-xl bg-zinc-950 border border-zinc-800 p-3.5 text-xs space-y-1.5">
+                    <div className="font-semibold text-orange-300 flex items-center gap-1.5">
+                      <Smartphone className="w-3.5 h-3.5" />
+                      Uploading from Your Phone in Cursor
+                    </div>
+                    <p className="text-zinc-400 leading-relaxed">
+                      1. Open <strong className="text-zinc-200">cursor.com/agents</strong> on your phone (or the Cursor mobile app) and open this session.
+                    </p>
+                    <p className="text-zinc-400 leading-relaxed">
+                      2. Tap the <strong className="text-zinc-200">+ / attachment</strong> icon in the message box to upload your inspiration video directly from your camera roll—I can analyze the video frames and match the exact sidebar animation, spacing, and transitions!
+                    </p>
+                  </div>
+                </div>
+
+                {inspoVideoUrl && (
+                  <div className="rounded-xl overflow-hidden border border-orange-500/30 bg-black p-2">
+                    <p className="text-xs font-mono text-orange-300 mb-2 px-1">
+                      Reference Inspiration Preview ({inspoVideoName})
+                    </p>
+                    <video
+                      src={inspoVideoUrl}
+                      controls
+                      loop
+                      muted
+                      className="w-full max-h-64 rounded-lg object-contain bg-black"
+                    />
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+
+            {/* GitHub Repo Push & Plug-and-Play Community Installer Card */}
+            <Card className="bg-zinc-900/80 border-zinc-800">
+              <CardHeader className="pb-3 border-b border-zinc-800/80">
+                <CardTitle className="text-base text-white flex items-center gap-2">
+                  <GitBranch className="w-4 h-4 text-emerald-400" />
+                  Publish to{" "}
+                  <code className="text-emerald-300">
+                    github.com/{config.githubOwner}/{config.repoName}
+                  </code>{" "}
+                  & Plug-and-Play CLI
+                </CardTitle>
+                <CardDescription className="text-xs text-zinc-400">
+                  One-click repository creation or terminal push so anyone can clone and customize their own LG webOS TV
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="p-4 space-y-3">
+                <Tabs defaultValue="github">
                   <TabsList className="bg-zinc-950 border border-zinc-800 mb-3">
-                    <TabsTrigger value="console" className="text-xs">
-                      Deploy & Console
+                    <TabsTrigger value="github" className="text-xs">
+                      Push to GitHub ({config.repoName})
                     </TabsTrigger>
-                    <TabsTrigger value="homexml" className="text-xs">
-                      Flutter home.xml
+                    <TabsTrigger value="plugplay" className="text-xs">
+                      Plug & Play Run
                     </TabsTrigger>
                     <TabsTrigger value="debloatsh" className="text-xs">
                       debloat_home.sh
+                    </TabsTrigger>
+                    <TabsTrigger value="homexml" className="text-xs">
+                      home.xml
                     </TabsTrigger>
                     <TabsTrigger value="keybinds" className="text-xs">
                       keybinds.json
                     </TabsTrigger>
                   </TabsList>
 
-                  <TabsContent value="console" className="space-y-3">
+                  <TabsContent value="github" className="space-y-3">
+                    <div className="rounded-lg bg-zinc-950 border border-emerald-500/30 p-3 space-y-2">
+                      <p className="text-xs font-semibold text-emerald-300">
+                        Method A (Easiest in Cursor): Click the &quot;Create repo&quot; Pill
+                      </p>
+                      <p className="text-xs text-zinc-400">
+                        Because this session started as a new project without a linked GitHub repository, click the{" "}
+                        <strong className="text-white">Create repo</strong> pill at the top of your Cursor agent view and name it{" "}
+                        <code className="text-orange-300">lgOS-getSlopped</code> under{" "}
+                        <code className="text-orange-300">james-lopez</code>. All commits on <code className="text-zinc-200">main</code> will immediately publish there.
+                      </p>
+                    </div>
+
                     <div className="rounded-lg bg-zinc-950 border border-zinc-800 p-3 space-y-2">
                       <div className="flex items-center justify-between">
                         <span className="text-xs font-medium text-zinc-300">
-                          Option 1: Run SlopBro (Roots TV + Automatically Runs{" "}
-                          <code>debloat_home.sh</code>)
+                          Method B: Push Directly via Git Remote
+                        </span>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="h-7 text-xs text-zinc-400 hover:text-white gap-1.5"
+                          onClick={() =>
+                            copyText(
+                              "ghpush",
+                              `git remote add github https://github.com/${config.githubOwner}/${config.repoName}.git\ngit push -u github main`
+                            )
+                          }
+                        >
+                          {copiedKey === "ghpush" ? (
+                            <Check className="w-3.5 h-3.5 text-emerald-400" />
+                          ) : (
+                            <Copy className="w-3.5 h-3.5" />
+                          )}
+                          Copy Commands
+                        </Button>
+                      </div>
+                      <pre className="text-xs font-mono text-emerald-400 bg-black/60 p-2.5 rounded border border-zinc-800/80 overflow-x-auto">
+                        {`git remote add github https://github.com/${config.githubOwner}/${config.repoName}.git\ngit push -u github main`}
+                      </pre>
+                    </div>
+                  </TabsContent>
+
+                  <TabsContent value="plugplay" className="space-y-3">
+                    <div className="rounded-lg bg-zinc-950 border border-zinc-800 p-3 space-y-2">
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs font-medium text-zinc-300">
+                          Plug-and-Play Single Command (For You or Any Community User)
                         </span>
                         <Button
                           variant="ghost"
@@ -664,7 +1089,7 @@ export default function G3StudioPage() {
                           onClick={() =>
                             copyText(
                               "cmd1",
-                              `python3 slopbro.py --debug --webos-version 10 ${config.tvIp}`
+                              `git clone https://github.com/${config.githubOwner}/${config.repoName}.git\ncd ${config.repoName}\npython3 slopbro.py --debug --webos-version 10 ${config.tvIp}`
                             )
                           }
                         >
@@ -673,67 +1098,17 @@ export default function G3StudioPage() {
                           ) : (
                             <Copy className="w-3.5 h-3.5" />
                           )}
-                          Copy Command
+                          Copy
                         </Button>
                       </div>
-                      <pre className="text-xs font-mono text-emerald-400 bg-black/60 p-2.5 rounded border border-zinc-800/80 overflow-x-auto">
-                        python3 slopbro.py --debug --webos-version 10 {config.tvIp}
-                      </pre>
-                    </div>
-
-                    <div className="rounded-lg bg-zinc-950 border border-zinc-800 p-3 space-y-2">
-                      <div className="flex items-center justify-between">
-                        <span className="text-xs font-medium text-zinc-300">
-                          Option 2: Already Rooted? Push & Apply{" "}
-                          <code>debloat_home.sh</code> Over SSH
-                        </span>
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          className="h-7 text-xs text-zinc-400 hover:text-white gap-1.5"
-                          onClick={() =>
-                            copyText(
-                              "cmd2",
-                              `ssh root@${config.tvIp} "sh -s" < wwwroot/debloat_home.sh`
-                            )
-                          }
-                        >
-                          {copiedKey === "cmd2" ? (
-                            <Check className="w-3.5 h-3.5 text-emerald-400" />
-                          ) : (
-                            <Copy className="w-3.5 h-3.5" />
-                          )}
-                          Copy SSH One-Liner
-                        </Button>
-                      </div>
-                      <pre className="text-xs font-mono text-cyan-400 bg-black/60 p-2.5 rounded border border-zinc-800/80 overflow-x-auto">
-                        ssh root@{config.tvIp} &quot;sh -s&quot; &lt; wwwroot/debloat_home.sh
+                      <pre className="text-xs font-mono text-orange-300 bg-black/60 p-2.5 rounded border border-zinc-800/80 overflow-x-auto">
+                        {`git clone https://github.com/${config.githubOwner}/${config.repoName}.git\ncd ${config.repoName}\npython3 slopbro.py --debug --webos-version 10 ${config.tvIp}`}
                       </pre>
                     </div>
 
                     <div className="rounded-lg bg-black border border-zinc-800 p-3">
-                      <div className="flex items-center justify-between text-[11px] text-zinc-500 mb-1.5 font-mono">
-                        <span>SLOPBRO OUTPUT LOG</span>
-                        <span>SSAP Port 3001 (TLS)</span>
-                      </div>
-                      <pre className="text-xs font-mono text-zinc-300 whitespace-pre-wrap max-h-48 overflow-y-auto">
+                      <pre className="text-xs font-mono text-zinc-300 whitespace-pre-wrap max-h-40 overflow-y-auto">
                         {terminalLog}
-                      </pre>
-                    </div>
-                  </TabsContent>
-
-                  <TabsContent value="homexml">
-                    <div className="relative">
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        className="absolute right-2 top-2 h-7 text-xs bg-zinc-900 border-zinc-700"
-                        onClick={() => copyText("xml", generatedXml)}
-                      >
-                        {copiedKey === "xml" ? "Copied!" : "Copy XML"}
-                      </Button>
-                      <pre className="text-xs font-mono text-emerald-300 bg-black p-4 rounded-lg border border-zinc-800 overflow-x-auto max-h-80">
-                        {generatedXml}
                       </pre>
                     </div>
                   </TabsContent>
@@ -748,8 +1123,24 @@ export default function G3StudioPage() {
                       >
                         {copiedKey === "sh" ? "Copied!" : "Copy Script"}
                       </Button>
-                      <pre className="text-xs font-mono text-cyan-300 bg-black p-4 rounded-lg border border-zinc-800 overflow-x-auto max-h-80">
+                      <pre className="text-xs font-mono text-cyan-300 bg-black p-4 rounded-lg border border-zinc-800 overflow-x-auto max-h-72">
                         {debloatScript}
+                      </pre>
+                    </div>
+                  </TabsContent>
+
+                  <TabsContent value="homexml">
+                    <div className="relative">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="absolute right-2 top-2 h-7 text-xs bg-zinc-900 border-zinc-700"
+                        onClick={() => copyText("xml", generatedXml)}
+                      >
+                        {copiedKey === "xml" ? "Copied!" : "Copy XML"}
+                      </Button>
+                      <pre className="text-xs font-mono text-emerald-300 bg-black p-4 rounded-lg border border-zinc-800 overflow-x-auto max-h-72">
+                        {generatedXml}
                       </pre>
                     </div>
                   </TabsContent>
@@ -764,7 +1155,7 @@ export default function G3StudioPage() {
                       >
                         {copiedKey === "kb" ? "Copied!" : "Copy JSON"}
                       </Button>
-                      <pre className="text-xs font-mono text-amber-300 bg-black p-4 rounded-lg border border-zinc-800 overflow-x-auto max-h-80">
+                      <pre className="text-xs font-mono text-amber-300 bg-black p-4 rounded-lg border border-zinc-800 overflow-x-auto max-h-72">
                         {generatedKeybinds}
                       </pre>
                     </div>
@@ -774,394 +1165,487 @@ export default function G3StudioPage() {
             </Card>
           </div>
 
-          {/* Right 5 Columns: Configuration Controls */}
+          {/* Right 5 Columns: Sidebar Apps, Seasonal Theme, Privacy & Remote Customizer */}
           <div className="lg:col-span-5 space-y-6">
             <Card className="bg-zinc-900/80 border-zinc-800">
               <CardHeader className="pb-3 border-b border-zinc-800/80">
                 <CardTitle className="text-base text-white">
-                  OLED65G3PUA Control & Customization
+                  Sidebar, Seasonal Theme & OS Customizer
                 </CardTitle>
                 <CardDescription className="text-xs text-zinc-400">
-                  Every toggle immediately updates{" "}
-                  <code className="text-zinc-300">wwwroot/debloat_home.sh</code> and{" "}
-                  <code className="text-zinc-300">dist/slopbro_packed.py</code>
+                  Play with the sidebar apps, Fall/Pumpkin turn-on visuals, and privacy shields before running on{" "}
+                  <code className="text-zinc-200">{config.tvIp}</code>
                 </CardDescription>
               </CardHeader>
 
               <CardContent className="p-4">
-                <Tabs defaultValue="home">
-                  <TabsList className="grid grid-cols-4 bg-zinc-950 border border-zinc-800 mb-4">
+                <Tabs defaultValue="sidebar">
+                  <TabsList className="grid grid-cols-5 bg-zinc-950 border border-zinc-800 mb-4">
+                    <TabsTrigger value="sidebar" className="text-xs">
+                      Sidebar
+                    </TabsTrigger>
+                    <TabsTrigger value="season" className="text-xs">
+                      Fall BG
+                    </TabsTrigger>
                     <TabsTrigger value="home" className="text-xs">
-                      Home UI
+                      XML
                     </TabsTrigger>
                     <TabsTrigger value="privacy" className="text-xs">
-                      Ads & ACR
+                      Privacy
                     </TabsTrigger>
                     <TabsTrigger value="remote" className="text-xs">
                       Remote
                     </TabsTrigger>
-                    <TabsTrigger value="target" className="text-xs">
-                      Target TV
-                    </TabsTrigger>
                   </TabsList>
 
-                  {/* TAB 1: HOME MENU SPEEDUP */}
-                  <TabsContent value="home" className="space-y-4">
-                    <div className="space-y-2">
-                      <Label className="text-xs text-zinc-300 uppercase tracking-wider">
-                        Home Modification Strategy
-                      </Label>
-                      <div className="grid grid-cols-2 gap-2">
+                  {/* TAB 1: SIDEBAR APPS & NAVIGATION */}
+                  <TabsContent value="sidebar" className="space-y-3">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <p className="text-xs font-semibold uppercase tracking-wider text-orange-300">
+                          Major Apps in Sidebar Rail
+                        </p>
+                        <p className="text-[11px] text-zinc-400">
+                          Toggle or reorder apps in the vertical sidebar
+                        </p>
+                      </div>
+                      <div className="flex items-center gap-1 bg-zinc-950 p-1 rounded border border-zinc-800">
                         <button
                           type="button"
                           onClick={() =>
                             syncConfig({
                               ...config,
-                              homeLayout: {
-                                ...config.homeLayout,
-                                mode: "stock-debloated",
+                              launcherTheme: {
+                                ...config.launcherTheme,
+                                sidebarPosition: "left",
                               },
                             })
                           }
-                          className={`p-3 rounded-lg border text-left transition ${
-                            config.homeLayout.mode === "stock-debloated"
-                              ? "bg-emerald-950/40 border-emerald-500/60 text-white"
-                              : "bg-zinc-950 border-zinc-800 text-zinc-400 hover:text-zinc-200"
+                          className={`px-2 py-0.5 rounded text-[11px] ${
+                            config.launcherTheme.sidebarPosition === "left"
+                              ? "bg-orange-600 text-white"
+                              : "text-zinc-400"
                           }`}
                         >
-                          <div className="text-xs font-semibold flex items-center gap-1.5">
-                            <Layers className="w-3.5 h-3.5 text-emerald-400" />
-                            Debloat Stock Home
-                          </div>
-                          <p className="text-[11px] text-zinc-400 mt-1">
-                            Bind-mounts stripped <code>home.xml</code> over webOS 10.3.0 Flutter Home. Fast & native.
-                          </p>
+                          Left Dock
                         </button>
-
                         <button
                           type="button"
                           onClick={() =>
                             syncConfig({
                               ...config,
-                              homeLayout: {
-                                ...config.homeLayout,
-                                mode: "custom-home",
+                              launcherTheme: {
+                                ...config.launcherTheme,
+                                sidebarPosition: "right",
                               },
                             })
                           }
-                          className={`p-3 rounded-lg border text-left transition ${
-                            config.homeLayout.mode === "custom-home"
-                              ? "bg-emerald-950/40 border-emerald-500/60 text-white"
-                              : "bg-zinc-950 border-zinc-800 text-zinc-400 hover:text-zinc-200"
+                          className={`px-2 py-0.5 rounded text-[11px] ${
+                            config.launcherTheme.sidebarPosition === "right"
+                              ? "bg-orange-600 text-white"
+                              : "text-zinc-400"
                           }`}
                         >
-                          <div className="text-xs font-semibold flex items-center gap-1.5">
-                            <Zap className="w-3.5 h-3.5 text-cyan-400" />
-                            Custom Home Takeover
-                          </div>
-                          <p className="text-[11px] text-zinc-400 mt-1">
-                            Installs <code>tld.my.customhome</code> & intercepts HOME button (773).
-                          </p>
+                          Right Dock
                         </button>
                       </div>
                     </div>
 
-                    <Separator className="bg-zinc-800" />
-
-                    <div className="space-y-3">
-                      <div className="flex items-center justify-between">
-                        <div>
-                          <p className="text-sm font-medium text-white">
-                            Remove Recommended Shelf (531px)
-                          </p>
-                          <p className="text-xs text-zinc-400">
-                            Strips <code>&lt;item id=&quot;recommendedShelf&quot;/&gt;</code> from <code>home.xml</code>
-                          </p>
-                        </div>
-                        <Switch
-                          checked={config.homeLayout.removeRecommendedShelf}
-                          onCheckedChange={(v) =>
-                            syncConfig({
-                              ...config,
-                              homeLayout: {
-                                ...config.homeLayout,
-                                removeRecommendedShelf: v,
-                              },
-                            })
-                          }
-                        />
-                      </div>
-
-                      <div className="flex items-center justify-between">
-                        <div>
-                          <p className="text-sm font-medium text-white">
-                            Remove Q-Card Bloat Row
-                          </p>
-                          <p className="text-xs text-zinc-400">
-                            Strips <code>&lt;item id=&quot;qcardList&quot;/&gt;</code> above the app bar
-                          </p>
-                        </div>
-                        <Switch
-                          checked={config.homeLayout.removeQCardList}
-                          onCheckedChange={(v) =>
-                            syncConfig({
-                              ...config,
-                              homeLayout: {
-                                ...config.homeLayout,
-                                removeQCardList: v,
-                              },
-                            })
-                          }
-                        />
-                      </div>
-
-                      <div className="flex items-center justify-between">
-                        <div>
-                          <p className="text-sm font-medium text-white">
-                            Pure Pitch-Black OLED Hero Banner
-                          </p>
-                          <p className="text-xs text-zinc-400">
-                            Replaces <code>bg_banner_img.png</code> (HD/2K/4K) with 67-byte 1x1 black PNG
-                          </p>
-                        </div>
-                        <Switch
-                          checked={config.homeLayout.oledBlackBanner}
-                          onCheckedChange={(v) =>
-                            syncConfig({
-                              ...config,
-                              homeLayout: {
-                                ...config.homeLayout,
-                                oledBlackBanner: v,
-                              },
-                            })
-                          }
-                        />
-                      </div>
-
-                      <div className="flex items-center justify-between">
-                        <div>
-                          <p className="text-sm font-medium text-white">
-                            Hide Top-Right Global Navigation Icons
-                          </p>
-                          <p className="text-xs text-zinc-400">
-                            Sets <code>globalline</code> to <code>0x0</code> after <code>herobanner</code> (prevents black screen)
-                          </p>
-                        </div>
-                        <Switch
-                          checked={config.homeLayout.hideGlobalLine}
-                          onCheckedChange={(v) =>
-                            syncConfig({
-                              ...config,
-                              homeLayout: {
-                                ...config.homeLayout,
-                                hideGlobalLine: v,
-                              },
-                            })
-                          }
-                        />
-                      </div>
-
-                      <div className="flex items-center justify-between">
-                        <div>
-                          <p className="text-sm font-medium text-white">
-                            Strip Hero Promo Text (i18n Symlink Override)
-                          </p>
-                          <p className="text-xs text-zinc-400">
-                            Blanks &quot;Start a new experience with webOS&quot; & &quot;Go to Apps&quot;
-                          </p>
-                        </div>
-                        <Switch
-                          checked={config.homeLayout.blankPromoText}
-                          onCheckedChange={(v) =>
-                            syncConfig({
-                              ...config,
-                              homeLayout: {
-                                ...config.homeLayout,
-                                blankPromoText: v,
-                              },
-                            })
-                          }
-                        />
-                      </div>
-                    </div>
-                  </TabsContent>
-
-                  {/* TAB 2: PRIVACY, ADS & BLOATWARE */}
-                  <TabsContent value="privacy" className="space-y-4">
-                    <div className="space-y-3">
-                      <div className="flex items-center justify-between">
-                        <div>
-                          <p className="text-sm font-medium text-white flex items-center gap-1.5">
-                            <WifiOff className="w-3.5 h-3.5 text-emerald-400" />
-                            Sinkhole LG Ad & ACR Domains (/etc/hosts)
-                          </p>
-                          <p className="text-xs text-zinc-400">
-                            Bind-mounts 28 ad, LivePlus, SmartClip & RDX telemetry domains to 0.0.0.0
-                          </p>
-                        </div>
-                        <Switch
-                          checked={config.privacy.blockAdHosts}
-                          onCheckedChange={(v) =>
-                            syncConfig({
-                              ...config,
-                              privacy: { ...config.privacy, blockAdHosts: v },
-                            })
-                          }
-                        />
-                      </div>
-
-                      <div className="flex items-center justify-between">
-                        <div>
-                          <p className="text-sm font-medium text-white">
-                            Disable LivePlus ACR (Screen Recognition Spyware)
-                          </p>
-                          <p className="text-xs text-zinc-400">
-                            Forces <code>livePlus: &quot;off&quot;</code> and <code>personalizedAd: &quot;off&quot;</code> via Luna
-                          </p>
-                        </div>
-                        <Switch
-                          checked={config.privacy.disableLivePlusAcr}
-                          onCheckedChange={(v) =>
-                            syncConfig({
-                              ...config,
-                              privacy: {
-                                ...config.privacy,
-                                disableLivePlusAcr: v,
-                              },
-                            })
-                          }
-                        />
-                      </div>
-
-                      <div className="flex items-center justify-between">
-                        <div>
-                          <p className="text-sm font-medium text-white">
-                            Kill AdOverlay & ACR Daemons in RAM
-                          </p>
-                          <p className="text-xs text-zinc-400">
-                            Terminates <code>adoverlay</code>, <code>adoverlayex</code>, <code>acroverlay</code>, and <code>rdxd</code>
-                          </p>
-                        </div>
-                        <Switch
-                          checked={config.privacy.killAdOverlays}
-                          onCheckedChange={(v) =>
-                            syncConfig({
-                              ...config,
-                              privacy: {
-                                ...config.privacy,
-                                killAdOverlays: v,
-                                killRdxdTelemetry: v,
-                              },
-                            })
-                          }
-                        />
-                      </div>
-
-                      <div className="flex items-center justify-between">
-                        <div>
-                          <p className="text-sm font-medium text-white">
-                            Disable Home Auto-Launch & Promotions on Boot
-                          </p>
-                          <p className="text-xs text-zinc-400">
-                            Sets <code>homeAutoLaunch: &quot;off&quot;</code> & <code>homePromotion: &quot;off&quot;</code>
-                          </p>
-                        </div>
-                        <Switch
-                          checked={config.privacy.disableHomeAutoLaunch}
-                          onCheckedChange={(v) =>
-                            syncConfig({
-                              ...config,
-                              privacy: {
-                                ...config.privacy,
-                                disableHomeAutoLaunch: v,
-                                disableHomePromotion: v,
-                              },
-                            })
-                          }
-                        />
-                      </div>
-
-                      <div className="flex items-center justify-between">
-                        <div>
-                          <p className="text-sm font-medium text-white">
-                            Block LG OTA Firmware Update Servers
-                          </p>
-                          <p className="text-xs text-zinc-400">
-                            Blocks <code>snu.lge.com</code> & <code>su-ssl.lge.com</code> so LG cannot patch root
-                          </p>
-                        </div>
-                        <Switch
-                          checked={config.privacy.blockOtaUpdates}
-                          onCheckedChange={(v) =>
-                            syncConfig({
-                              ...config,
-                              privacy: {
-                                ...config.privacy,
-                                blockOtaUpdates: v,
-                              },
-                            })
-                          }
-                        />
-                      </div>
-                    </div>
-
-                    <Separator className="bg-zinc-800" />
-
-                    <div className="space-y-2.5">
-                      <p className="text-xs font-semibold uppercase tracking-wider text-zinc-400 flex items-center gap-1.5">
-                        <Trash2 className="w-3.5 h-3.5 text-rose-400" />
-                        Uninstall Promotional Apps
-                      </p>
-                      {[
-                        {
-                          key: "removeShopTime" as const,
-                          label: "LG ShopTime (com.lgshop.app)",
-                        },
-                        {
-                          key: "removeLgChannels" as const,
-                          label: "LG Channels (com.webos.app.lgchannels)",
-                        },
-                        {
-                          key: "removeSportsAlert" as const,
-                          label: "Sports Alert (com.webos.app.sportsalert)",
-                        },
-                        {
-                          key: "removeFubo" as const,
-                          label: "FuboTV / Partner Promo (love.fubo)",
-                        },
-                      ].map((item) => (
+                    <div className="space-y-2 max-h-[420px] overflow-y-auto pr-1">
+                      {config.sidebarApps.map((app, index) => (
                         <div
-                          key={item.key}
-                          className="flex items-center justify-between text-xs"
+                          key={app.id}
+                          className="p-2.5 rounded-lg bg-zinc-950 border border-zinc-800 flex items-center justify-between gap-2"
                         >
-                          <span className="text-zinc-300">{item.label}</span>
-                          <Switch
-                            checked={config.bloatware[item.key]}
-                            onCheckedChange={(v) =>
-                              syncConfig({
-                                ...config,
-                                bloatware: {
-                                  ...config.bloatware,
-                                  [item.key]: v,
-                                },
-                              })
-                            }
-                          />
+                          <div className="flex items-center gap-2.5 min-w-0">
+                            <div
+                              className="w-7 h-7 rounded-lg flex items-center justify-center text-white shrink-0"
+                              style={{ backgroundColor: app.accentColor }}
+                            >
+                              {renderAppIcon(app.iconKey)}
+                            </div>
+                            <div className="min-w-0">
+                              <p className="text-xs font-medium text-white truncate">
+                                {app.name}
+                              </p>
+                              <p className="text-[10px] text-zinc-500 font-mono truncate">
+                                {app.id}
+                              </p>
+                            </div>
+                          </div>
+
+                          <div className="flex items-center gap-1.5 shrink-0">
+                            <button
+                              type="button"
+                              onClick={() => moveSidebarApp(index, -1)}
+                              disabled={index === 0}
+                              className="p-1 rounded bg-zinc-900 hover:bg-zinc-800 disabled:opacity-30 text-zinc-300"
+                              title="Move Up"
+                            >
+                              <ChevronUp className="w-3.5 h-3.5" />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => moveSidebarApp(index, 1)}
+                              disabled={index === config.sidebarApps.length - 1}
+                              className="p-1 rounded bg-zinc-900 hover:bg-zinc-800 disabled:opacity-30 text-zinc-300"
+                              title="Move Down"
+                            >
+                              <ChevronDown className="w-3.5 h-3.5" />
+                            </button>
+                            <Switch
+                              checked={app.enabled}
+                              onCheckedChange={(v) => {
+                                const updated = config.sidebarApps.map((item, i) =>
+                                  i === index ? { ...item, enabled: v } : item
+                                );
+                                syncConfig({ ...config, sidebarApps: updated });
+                              }}
+                            />
+                          </div>
                         </div>
                       ))}
                     </div>
                   </TabsContent>
 
-                  {/* TAB 3: MAGIC REMOTE BUTTON REMAPPING */}
-                  <TabsContent value="remote" className="space-y-4">
-                    <div className="flex items-center justify-between p-3 rounded-lg bg-zinc-950 border border-zinc-800">
+                  {/* TAB 2: SEASONAL FALL & PUMPKIN BACKGROUND */}
+                  <TabsContent value="season" className="space-y-4">
+                    <div className="space-y-2">
+                      <Label className="text-xs text-zinc-300 uppercase tracking-wider">
+                        Turn-On Seasonal Backdrop
+                      </Label>
+                      <div className="grid grid-cols-1 gap-2">
+                        {[
+                          {
+                            id: "fall-pumpkin" as const,
+                            title: "Autumn Harvest & Glowing Pumpkins (Active)",
+                            desc: "Warm harvest moon, carved jack-o'-lantern glow & drifting autumn leaves on OLED dark canvas",
+                          },
+                          {
+                            id: "winter-aurora" as const,
+                            title: "Winter Midnight Aurora",
+                            desc: "Deep arctic blue & emerald aurora borealis gradient",
+                          },
+                          {
+                            id: "midnight-oled" as const,
+                            title: "Pure Pitch-Black OLED (0% APL)",
+                            desc: "Complete pixel-off background with floating sidebar rail",
+                          },
+                        ].map((preset) => (
+                          <button
+                            key={preset.id}
+                            type="button"
+                            onClick={() =>
+                              syncConfig({
+                                ...config,
+                                launcherTheme: {
+                                  ...config.launcherTheme,
+                                  activeSeason: preset.id,
+                                },
+                              })
+                            }
+                            className={`p-3 rounded-lg border text-left transition ${
+                              config.launcherTheme.activeSeason === preset.id
+                                ? "bg-orange-950/40 border-orange-500/60 text-white"
+                                : "bg-zinc-950 border-zinc-800 text-zinc-400 hover:text-zinc-200"
+                            }`}
+                          >
+                            <div className="text-xs font-semibold text-orange-200">
+                              {preset.title}
+                            </div>
+                            <div className="text-[11px] text-zinc-400 mt-0.5">
+                              {preset.desc}
+                            </div>
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
+                    <div className="space-y-2">
+                      <Label className="text-xs text-zinc-300">
+                        Turn-On Welcome Heading
+                      </Label>
+                      <Input
+                        value={config.launcherTheme.greetingTitle}
+                        onChange={(e) =>
+                          syncConfig({
+                            ...config,
+                            launcherTheme: {
+                              ...config.launcherTheme,
+                              greetingTitle: e.target.value,
+                            },
+                          })
+                        }
+                        className="bg-zinc-950 border-zinc-800 text-xs text-white"
+                      />
+                    </div>
+
+                    <div className="space-y-2">
+                      <Label className="text-xs text-zinc-300">
+                        Subheading / Ambience Caption
+                      </Label>
+                      <Input
+                        value={config.launcherTheme.greetingSubtitle}
+                        onChange={(e) =>
+                          syncConfig({
+                            ...config,
+                            launcherTheme: {
+                              ...config.launcherTheme,
+                              greetingSubtitle: e.target.value,
+                            },
+                          })
+                        }
+                        className="bg-zinc-950 border-zinc-800 text-xs text-white"
+                      />
+                    </div>
+
+                    <div className="flex items-center justify-between pt-1">
                       <div>
-                        <p className="text-sm font-medium text-white flex items-center gap-1.5">
-                          <Gamepad2 className="w-4 h-4 text-amber-400" />
-                          Install lginputhook v1.5.0 (webOS 25 Fix)
+                        <p className="text-sm font-medium text-white">
+                          Floating Autumn Leaves & Embers
                         </p>
                         <p className="text-xs text-zinc-400">
-                          Uses Syspoke&apos;s v1.5.0 <code>inputhookpp</code> build required for webOS 10.3.0 / 25
+                          Subtle ambient particles across the background
+                        </p>
+                      </div>
+                      <Switch
+                        checked={config.launcherTheme.ambientParticles}
+                        onCheckedChange={(v) =>
+                          syncConfig({
+                            ...config,
+                            launcherTheme: {
+                              ...config.launcherTheme,
+                              ambientParticles: v,
+                            },
+                          })
+                        }
+                      />
+                    </div>
+
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <p className="text-sm font-medium text-white">
+                          Frosted Glass Sidebar Backdrop
+                        </p>
+                        <p className="text-xs text-zinc-400">
+                          Translucent blur over the pumpkin harvest scene
+                        </p>
+                      </div>
+                      <Switch
+                        checked={
+                          config.launcherTheme.sidebarStyle === "frosted-glass"
+                        }
+                        onCheckedChange={(v) =>
+                          syncConfig({
+                            ...config,
+                            launcherTheme: {
+                              ...config.launcherTheme,
+                              sidebarStyle: v ? "frosted-glass" : "pure-oled",
+                            },
+                          })
+                        }
+                      />
+                    </div>
+                  </TabsContent>
+
+                  {/* TAB 3: FLUTTER HOME.XML OVERLAY */}
+                  <TabsContent value="home" className="space-y-3">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <p className="text-sm font-medium text-white">
+                          Remove Recommended Shelf (531px)
+                        </p>
+                        <p className="text-xs text-zinc-400">
+                          Strips <code>recommendedShelf</code> from <code>home.xml</code>
+                        </p>
+                      </div>
+                      <Switch
+                        checked={config.homeLayout.removeRecommendedShelf}
+                        onCheckedChange={(v) =>
+                          syncConfig({
+                            ...config,
+                            homeLayout: {
+                              ...config.homeLayout,
+                              removeRecommendedShelf: v,
+                            },
+                          })
+                        }
+                      />
+                    </div>
+
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <p className="text-sm font-medium text-white">
+                          Remove Q-Card Bloat Row
+                        </p>
+                        <p className="text-xs text-zinc-400">
+                          Strips <code>qcardList</code> above the app bar
+                        </p>
+                      </div>
+                      <Switch
+                        checked={config.homeLayout.removeQCardList}
+                        onCheckedChange={(v) =>
+                          syncConfig({
+                            ...config,
+                            homeLayout: {
+                              ...config.homeLayout,
+                              removeQCardList: v,
+                            },
+                          })
+                        }
+                      />
+                    </div>
+
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <p className="text-sm font-medium text-white">
+                          Hide Top-Right Global Navigation Icons
+                        </p>
+                        <p className="text-xs text-zinc-400">
+                          Sets <code>globalline</code> to <code>0x0</code> after <code>herobanner</code>
+                        </p>
+                      </div>
+                      <Switch
+                        checked={config.homeLayout.hideGlobalLine}
+                        onCheckedChange={(v) =>
+                          syncConfig({
+                            ...config,
+                            homeLayout: {
+                              ...config.homeLayout,
+                              hideGlobalLine: v,
+                            },
+                          })
+                        }
+                      />
+                    </div>
+
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <p className="text-sm font-medium text-white">
+                          Strip Hero Promo Text (i18n Override)
+                        </p>
+                        <p className="text-xs text-zinc-400">
+                          Blanks &quot;Start a new experience with webOS&quot;
+                        </p>
+                      </div>
+                      <Switch
+                        checked={config.homeLayout.blankPromoText}
+                        onCheckedChange={(v) =>
+                          syncConfig({
+                            ...config,
+                            homeLayout: {
+                              ...config.homeLayout,
+                              blankPromoText: v,
+                            },
+                          })
+                        }
+                      />
+                    </div>
+                  </TabsContent>
+
+                  {/* TAB 4: PRIVACY, ADS & BLOATWARE */}
+                  <TabsContent value="privacy" className="space-y-3">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <p className="text-sm font-medium text-white flex items-center gap-1.5">
+                          <WifiOff className="w-3.5 h-3.5 text-emerald-400" />
+                          Sinkhole LG Ad & ACR Domains (/etc/hosts)
+                        </p>
+                        <p className="text-xs text-zinc-400">
+                          28 ad, LivePlus, SmartClip & RDX domains to 0.0.0.0
+                        </p>
+                      </div>
+                      <Switch
+                        checked={config.privacy.blockAdHosts}
+                        onCheckedChange={(v) =>
+                          syncConfig({
+                            ...config,
+                            privacy: { ...config.privacy, blockAdHosts: v },
+                          })
+                        }
+                      />
+                    </div>
+
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <p className="text-sm font-medium text-white">
+                          Disable LivePlus ACR (Screen Recognition)
+                        </p>
+                        <p className="text-xs text-zinc-400">
+                          Forces <code>livePlus: &quot;off&quot;</code> and <code>personalizedAd: &quot;off&quot;</code>
+                        </p>
+                      </div>
+                      <Switch
+                        checked={config.privacy.disableLivePlusAcr}
+                        onCheckedChange={(v) =>
+                          syncConfig({
+                            ...config,
+                            privacy: {
+                              ...config.privacy,
+                              disableLivePlusAcr: v,
+                            },
+                          })
+                        }
+                      />
+                    </div>
+
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <p className="text-sm font-medium text-white">
+                          Kill AdOverlay & RDXD Daemons in RAM
+                        </p>
+                        <p className="text-xs text-zinc-400">
+                          Terminates <code>adoverlay</code>, <code>acroverlay</code>, and <code>rdxd</code>
+                        </p>
+                      </div>
+                      <Switch
+                        checked={config.privacy.killAdOverlays}
+                        onCheckedChange={(v) =>
+                          syncConfig({
+                            ...config,
+                            privacy: {
+                              ...config.privacy,
+                              killAdOverlays: v,
+                              killRdxdTelemetry: v,
+                            },
+                          })
+                        }
+                      />
+                    </div>
+
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <p className="text-sm font-medium text-white">
+                          Block LG OTA Firmware Updates
+                        </p>
+                        <p className="text-xs text-zinc-400">
+                          Protects root across reboots
+                        </p>
+                      </div>
+                      <Switch
+                        checked={config.privacy.blockOtaUpdates}
+                        onCheckedChange={(v) =>
+                          syncConfig({
+                            ...config,
+                            privacy: {
+                              ...config.privacy,
+                              blockOtaUpdates: v,
+                            },
+                          })
+                        }
+                      />
+                    </div>
+                  </TabsContent>
+
+                  {/* TAB 5: MAGIC REMOTE REMAPPING */}
+                  <TabsContent value="remote" className="space-y-3">
+                    <div className="flex items-center justify-between p-2.5 rounded-lg bg-zinc-950 border border-zinc-800">
+                      <div>
+                        <p className="text-xs font-medium text-white">
+                          Syspoke lginputhook v1.5.0 (webOS 25)
+                        </p>
+                        <p className="text-[11px] text-zinc-400">
+                          Remaps physical sponsored remote buttons via uinput_code
                         </p>
                       </div>
                       <Switch
@@ -1178,23 +1662,20 @@ export default function G3StudioPage() {
                       />
                     </div>
 
-                    <div className="space-y-2.5">
+                    <div className="space-y-2 max-h-72 overflow-y-auto pr-1">
                       {Object.entries(config.keybinds.mappings).map(
                         ([key, mapping]) => (
                           <div
                             key={key}
-                            className="p-2.5 rounded-lg bg-zinc-950 border border-zinc-800 space-y-2"
+                            className="p-2.5 rounded-lg bg-zinc-950 border border-zinc-800 space-y-1.5"
                           >
                             <div className="flex items-center justify-between">
                               <span className="text-xs font-medium text-white">
-                                {mapping.buttonName} Button
+                                {mapping.buttonName}
                               </span>
-                              <Badge
-                                variant="outline"
-                                className="text-[10px] font-mono border-zinc-700 text-zinc-400"
-                              >
-                                uinput_code: {mapping.uinputCode}
-                              </Badge>
+                              <span className="text-[10px] font-mono text-zinc-400">
+                                uinput: {mapping.uinputCode}
+                              </span>
                             </div>
                             <div className="grid grid-cols-2 gap-2">
                               <select
@@ -1217,13 +1698,9 @@ export default function G3StudioPage() {
                                 }}
                                 className="bg-zinc-900 border border-zinc-700 rounded px-2 py-1 text-xs text-zinc-200"
                               >
-                                <option value="launch">Launch Custom App</option>
-                                <option value="disable">
-                                  Disable Button (Ignore)
-                                </option>
-                                <option value="unchanged">
-                                  Keep Default Behavior
-                                </option>
+                                <option value="launch">Launch App</option>
+                                <option value="disable">Disable</option>
+                                <option value="unchanged">Default</option>
                               </select>
 
                               {mapping.action === "launch" && (
@@ -1244,7 +1721,7 @@ export default function G3StudioPage() {
                                       },
                                     })
                                   }
-                                  className="bg-zinc-900 border border-zinc-700 rounded px-2 py-1 text-xs text-emerald-300"
+                                  className="bg-zinc-900 border border-zinc-700 rounded px-2 py-1 text-xs text-orange-300"
                                 >
                                   {APP_PRESETS.map((app) => (
                                     <option key={app.id} value={app.id}>
@@ -1257,108 +1734,6 @@ export default function G3StudioPage() {
                           </div>
                         )
                       )}
-                    </div>
-                  </TabsContent>
-
-                  {/* TAB 4: TARGET TV & SLOPBRO SETTINGS */}
-                  <TabsContent value="target" className="space-y-4">
-                    <div className="space-y-1.5">
-                      <Label className="text-xs text-zinc-300">
-                        LG TV LAN IPv4 Address
-                      </Label>
-                      <Input
-                        value={config.tvIp}
-                        onChange={(e) =>
-                          syncConfig({ ...config, tvIp: e.target.value })
-                        }
-                        className="bg-zinc-950 border-zinc-800 font-mono text-sm text-white"
-                        placeholder="192.168.97.141"
-                      />
-                    </div>
-
-                    <div className="space-y-1.5">
-                      <Label className="text-xs text-zinc-300">
-                        Local Machine IPv4 Override (Optional, for{" "}
-                        <code>--local-ip</code>)
-                      </Label>
-                      <Input
-                        value={config.localIpOverride}
-                        onChange={(e) =>
-                          syncConfig({
-                            ...config,
-                            localIpOverride: e.target.value,
-                          })
-                        }
-                        className="bg-zinc-950 border-zinc-800 font-mono text-sm text-white"
-                        placeholder="Auto-detect route toward 192.168.97.141"
-                      />
-                    </div>
-
-                    <div className="space-y-1.5">
-                      <Label className="text-xs text-zinc-300">
-                        Fake Service Path (<code>jsserver</code> Patch Bypass)
-                      </Label>
-                      <Input
-                        value={config.fakeServicePath}
-                        onChange={(e) =>
-                          syncConfig({
-                            ...config,
-                            fakeServicePath: e.target.value,
-                          })
-                        }
-                        className="bg-zinc-950 border-zinc-800 font-mono text-xs text-zinc-300"
-                      />
-                    </div>
-
-                    <div className="flex items-center justify-between pt-1">
-                      <div>
-                        <p className="text-sm font-medium text-white">
-                          Enable Debug Output (<code>--debug</code>)
-                        </p>
-                        <p className="text-xs text-zinc-400">
-                          Logs detailed status on TV screen and{" "}
-                          <code>/tmp/autoroot.log</code>
-                        </p>
-                      </div>
-                      <Switch
-                        checked={config.debug}
-                        onCheckedChange={(v) =>
-                          syncConfig({ ...config, debug: v })
-                        }
-                      />
-                    </div>
-
-                    <div className="flex items-center justify-between">
-                      <div>
-                        <p className="text-sm font-medium text-white">
-                          Allow Insecure Curl (<code>--curl-insecure</code>)
-                        </p>
-                        <p className="text-xs text-zinc-400">
-                          Use if TV clock is out of sync or LG SDP is already blocked
-                        </p>
-                      </div>
-                      <Switch
-                        checked={config.curlInsecure}
-                        onCheckedChange={(v) =>
-                          syncConfig({ ...config, curlInsecure: v })
-                        }
-                      />
-                    </div>
-
-                    <Separator className="bg-zinc-800" />
-
-                    <div className="p-3 rounded-lg bg-zinc-950 border border-zinc-800 space-y-2">
-                      <div className="flex items-center gap-2 text-xs font-medium text-amber-400">
-                        <RotateCcw className="w-3.5 h-3.5" />
-                        Instant Emergency Revert / Stock Restore
-                      </div>
-                      <p className="text-xs text-zinc-400">
-                        Because all modifications use a RAM bind-mount over{" "}
-                        <code>/usr/palm/applications/com.webos.app.home</code>, you can revert to 100% factory stock at any time without unrooting:
-                      </p>
-                      <pre className="text-[11px] font-mono text-zinc-300 bg-black p-2 rounded border border-zinc-800 overflow-x-auto">
-                        ssh root@{config.tvIp} &quot;/media/developer/apps/usr/palm/applications/tld.slopbro.g3mod/apply.sh --revert&quot;
-                      </pre>
                     </div>
                   </TabsContent>
                 </Tabs>

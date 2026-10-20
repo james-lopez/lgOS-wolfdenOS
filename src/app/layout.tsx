@@ -13,9 +13,9 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "SlopBro G3 Studio — LG OLED65G3PUA (webOS 25 / 10.3.0) Home & Privacy Suite",
+  title: "lgOS-getSlopped — LG webOS Sidebar Launcher, Seasonal Ambience & Privacy Suite",
   description:
-    "SlopBro root exploit + webOS 25 Flutter Home menu speedup, ACR/ad sinkhole, and Magic Remote button remapper for LG OLED65G3PUA (192.168.97.141).",
+    "Plug-and-play SlopBro edition for LG webOS TVs (OLED65G3PUA / webOS 25 10.3.0) with a seamless sidebar app dock, seasonal Fall & Pumpkin turn-on backdrop, and ad/ACR sinkhole.",
 };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {
