@@ -155,11 +155,227 @@ function renderAppIcon(iconKey: string) {
   }
 }
 
+const INITIAL_SIDEBAR_APPS: SidebarAppItem[] = [
+  {
+    id: "org.webosbrew.youtube.leanback.v4",
+    name: "YouTube AdFree",
+    subtitle: "4K HDR · SponsorBlock · 0 Ads",
+    category: "Streaming",
+    accentColor: "#f97316",
+    iconKey: "youtube",
+    enabled: true,
+  },
+  {
+    id: "netflix",
+    name: "Netflix",
+    subtitle: "Dolby Vision · Atmos",
+    category: "Streaming",
+    accentColor: "#ef4444",
+    iconKey: "netflix",
+    enabled: true,
+  },
+  {
+    id: "org.jellyfin.webos",
+    name: "Jellyfin",
+    subtitle: "Local Direct Play · 192.168.97.x",
+    category: "Media Server",
+    accentColor: "#a855f7",
+    iconKey: "jellyfin",
+    enabled: true,
+  },
+  {
+    id: "cdp-30",
+    name: "Plex",
+    subtitle: "Cinema Library · TrueHD",
+    category: "Media Server",
+    accentColor: "#f59e0b",
+    iconKey: "plex",
+    enabled: true,
+  },
+  {
+    id: "com.disney.disneyplus-prod",
+    name: "Disney+",
+    subtitle: "IMAX Enhanced · 4K",
+    category: "Streaming",
+    accentColor: "#3b82f6",
+    iconKey: "disney",
+    enabled: true,
+  },
+  {
+    id: "amazon",
+    name: "Prime Video",
+    subtitle: "UHD HDR10+",
+    category: "Streaming",
+    accentColor: "#06b6d4",
+    iconKey: "prime",
+    enabled: true,
+  },
+  {
+    id: "spotify-beehive",
+    name: "Spotify",
+    subtitle: "Lossless eARC Audio",
+    category: "Streaming",
+    accentColor: "#22c55e",
+    iconKey: "spotify",
+    enabled: true,
+  },
+  {
+    id: "com.webos.app.hdmi1",
+    name: "HDMI 1 · PlayStation 5",
+    subtitle: "4K 120Hz · VRR · ALLM",
+    category: "Gaming & Inputs",
+    accentColor: "#6366f1",
+    iconKey: "gamepad",
+    enabled: true,
+  },
+  {
+    id: "com.limelight.webos",
+    name: "Moonlight GameStream",
+    subtitle: "PC 4K 120fps · 0.8ms Decode",
+    category: "Gaming & Inputs",
+    accentColor: "#eab308",
+    iconKey: "moonlight",
+    enabled: true,
+  },
+  {
+    id: "org.webosbrew.hbchannel",
+    name: "Homebrew Channel",
+    subtitle: "Root Services & System Mods",
+    category: "System",
+    accentColor: "#ec4899",
+    iconKey: "homebrew",
+    enabled: true,
+  },
+];
+
+const INITIAL_CONFIG: G3ModConfig = {
+  repoName: "lgOS-getSlopped",
+  githubOwner: "james-lopez",
+  tvIp: "192.168.97.141",
+  tvModel: "OLED65G3PUA",
+  webosVersion: "10.3.0-2504 (webOS 25)",
+  localIpOverride: "",
+  debug: true,
+  curlInsecure: false,
+  fakeServicePath: "/usr/palm/services/com.palm.service.devmode",
+  launcherTheme: {
+    activeSeason: "fall-pumpkin",
+    greetingTitle: "Autumn Harvest on G3 OLED",
+    greetingSubtitle: "Cozy Fall & Pumpkin Ambience · Instant Sidebar Navigation",
+    ambientParticles: true,
+    turnOnAnimation: true,
+    sidebarPosition: "left",
+    sidebarStyle: "frosted-glass",
+    autoHideSidebarSec: 15,
+    customWallpaperUrl: "",
+  },
+  sidebarApps: INITIAL_SIDEBAR_APPS,
+  homeLayout: {
+    mode: "sidebar-launcher",
+    removeRecommendedShelf: true,
+    removeQCardList: true,
+    hideGlobalLine: true,
+    hideQuickGuide: true,
+    blankPromoText: true,
+    oledBlackBanner: false,
+    heroBannerHeight: 1803,
+    appListHeight: 248,
+  },
+  privacy: {
+    blockAdHosts: true,
+    disableLivePlusAcr: true,
+    disableHomePromotion: true,
+    disableHomeAutoLaunch: true,
+    disablePersonalizedAds: true,
+    killAdOverlays: true,
+    killRdxdTelemetry: true,
+    blockOtaUpdates: true,
+  },
+  bloatware: {
+    removeLgChannels: true,
+    removeShopTime: true,
+    removeFubo: true,
+    removeRakuten: true,
+    removeSportsAlert: true,
+  },
+  keybinds: {
+    installInputHook: true,
+    mappings: {
+      netflix: {
+        buttonName: "Netflix",
+        uinputCode: "1037",
+        action: "launch",
+        targetAppId: "org.webosbrew.youtube.leanback.v4",
+      },
+      prime: {
+        buttonName: "Prime Video",
+        uinputCode: "1039",
+        action: "launch",
+        targetAppId: "org.jellyfin.webos",
+      },
+      disney: {
+        buttonName: "Disney+",
+        uinputCode: "1047",
+        action: "launch",
+        targetAppId: "cdp-30",
+      },
+      lgchannels: {
+        buttonName: "LG Channels",
+        uinputCode: "1043",
+        action: "disable",
+        targetAppId: "",
+      },
+      sling: {
+        buttonName: "Sling / Partner 1",
+        uinputCode: "1125",
+        action: "disable",
+        targetAppId: "",
+      },
+      alexa: {
+        buttonName: "Alexa / Partner 2",
+        uinputCode: "1126",
+        action: "launch",
+        targetAppId: "com.limelight.webos",
+      },
+    },
+  },
+};
+
 export default function G3StudioPage() {
-  const [config, setConfig] = useState<G3ModConfig | null>(null);
-  const [generatedXml, setGeneratedXml] = useState<string>("");
-  const [generatedKeybinds, setGeneratedKeybinds] = useState<string>("");
-  const [debloatScript, setDebloatScript] = useState<string>("");
+  const [config, setConfig] = useState<G3ModConfig>(INITIAL_CONFIG);
+  const [generatedXml, setGeneratedXml] = useState<string>(`<?xml version="1.0" encoding="utf-8"?>
+<home version="2.0">
+<layout windowType="overlay" pageType="none" pageCount="1" defaultPage="0">
+<page pageBodyType="container">
+<item id="margin" itemWidth="3840" itemHeight="0" focusType="none"/>
+<item id="container" hasChildren="true" itemWidth="3840" itemHeight="1803" focusType="scope">
+<item id="herobanner" itemWidth="3840" itemHeight="1803" focusType="scope" autoFocus="false"/>
+<item id="globalline" itemWidth="0" itemHeight="0" focusType="scope" autoFocus="false"/>
+</item>
+<item id="margin" itemWidth="3840" itemHeight="50" focusType="none"/>
+<item id="appList" itemWidth="3840" itemHeight="248" focusType="scope" autoFocus="true"/>
+<item id="margin" itemWidth="3840" itemHeight="48" focusType="none"/>
+<item id="quickGuide" itemX="0" itemY="0" itemWidth="0" itemHeight="0" focusType="none"/>
+</page>
+</layout>
+</home>`);
+  const [generatedKeybinds, setGeneratedKeybinds] = useState<string>(
+    JSON.stringify(
+      {
+        "1037": { action: "launch", id: "org.webosbrew.youtube.leanback.v4" },
+        "1039": { action: "launch", id: "org.jellyfin.webos" },
+        "1043": { action: "ignore" },
+        "1047": { action: "launch", id: "cdp-30" },
+        "1125": { action: "ignore" },
+        "1126": { action: "launch", id: "com.limelight.webos" },
+      },
+      null,
+      2
+    )
+  );
+  const [debloatScript, setDebloatScript] = useState<string>(
+    "# Loading debloat_home.sh..."
+  );
   const [previewCompareMode, setPreviewCompareMode] = useState<
     "sidebar-seasonal" | "stock-debloated" | "stock-bloat"
   >("sidebar-seasonal");
@@ -311,17 +527,6 @@ export default function G3StudioPage() {
     setInspoVideoUrl(url);
     setInspoVideoName(file.name);
   };
-
-  if (!config) {
-    return (
-      <div className="min-h-screen bg-zinc-950 text-zinc-100 flex items-center justify-center">
-        <div className="flex items-center gap-3 text-zinc-400">
-          <RefreshCw className="w-5 h-5 animate-spin text-orange-400" />
-          <span>Loading lgOS-getSlopped Interactive UI Playground...</span>
-        </div>
-      </div>
-    );
-  }
 
   const focusedApp =
     enabledApps[selectedSidebarIdx] || enabledApps[0] || config.sidebarApps[0];
