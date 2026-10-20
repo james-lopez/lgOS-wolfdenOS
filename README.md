@@ -51,6 +51,10 @@ To revert all modifications back to factory stock webOS:
 - Installed as a native webOS web application at:
   - `/media/developer/apps/usr/palm/applications/tld.wolfdenos.home` (Primary — titled **`wolf OS`** with an 80×80 vibrant purple `W` icon `#6d28d9`, pinned at **`index: 0`** on the default LG Home screen app bar so it is always visible on power-on/power-off or when returning to the default LG screen).
   - `/media/developer/apps/usr/palm/applications/tld.slopbro.g3mod` (Mirror — titled **`wolfdenOS`**).
+- **The launcher does not auto-launch.** `apply.sh` installs and pins the tile
+  but no longer opens it at the end of a deploy: the work has moved to editing
+  the LG Home screen itself, and an app that takes over the screen hides what
+  is being changed.
 - **UI & Remote Navigation**:
   - Deep purplish-black OLED ambient gradient (`#1e0b36` -> `#0c0414` -> `#05020a`) with frosted glass dock (`backdrop-filter: blur(24px)`).
   - **15 Real Installed User Apps** on the main dock (with crisp monochrome SVG brand icons + native webOS `file://` icon fallback):
@@ -81,18 +85,21 @@ To revert all modifications back to factory stock webOS:
   - Overwrites `images/{hd,2k,4k}/bg_banner_img.png` and `*banner*.png` / `*default*.png` with a 1×1 pitch-black PNG (`black.png`).
 - **Offline / Promo Text Replaced with `wolf OS`**:
   - Dereferences the `i18n` symlink and rewrites `"Enjoy the device's smart functions by connecting to a network."`, `"Start a new experience with webOS"`, and related banner strings across all locale JSON files to **`"wolf OS"`**.
-- **8 System Bloat Apps Stripped**:
-  - Removed via `luna://com.webos.appInstallService/dev/remove` and `luna://com.webos.applicationManager/removeLaunchPoint`, and filtered from `INTERNAL_STUBS`:
-    - `amazon.alexa.view` (`Alexa`)
-    - `com.webos.app.sportsteamsettings` (`Sports Portal`)
-    - `com.webos.app.homeconnect` (`Home Hub`)
-    - `com.webos.app.lifeonscreen` (`Always Ready`)
-    - `com.webos.app.browser` (`Web Browser`)
-    - `com.webos.app.mediadiscovery` (`Media Player`)
-    - `com.webos.app.camera` (`Camera`)
-    - `com.webos.app.multiviewsettings` (`Multi View`)
+- **Promo & Ad Apps Masked, Not Removed**:
+  - `/usr` is a read-only overlay over squashfs, so nothing in
+    `/usr/palm/applications` can be deleted (`dev/remove` only reaches apps
+    under `/media/developer`). `mask_bloat_apps` bind-mounts an empty directory
+    over 21 promo and ad app directories instead, which leaves them
+    unlaunchable but still registered with SAM. `prune_launch_points` removes
+    their tiles. See "Day 3" for what this does and does not achieve.
 - **Ad, LivePlus ACR & Telemetry Sinkhole**:
-  - Bind-mounts `/tmp/hosts.slopbro` over `/etc/hosts` blocking 28 LG ad, SmartClip, Yume, LivePlus ACR, `rdx2`, and OTA update domains.
+  - Bind-mounts `/tmp/hosts.slopbro` over `/etc/hosts`, blocking the LG ad,
+    SmartClip, Yume, LivePlus ACR, `rdx2` and OTA update domains over both
+    IPv4 and IPv6.
+- **Connectivity check answered locally**:
+  - LG's probe host no longer exists, so the TV reported itself offline and the
+    Home screen drew the no-network banner over everything. A local responder
+    plus a `connman` config override fixes it. See "Day 3".
 
 ---
 
@@ -103,9 +110,13 @@ To revert all modifications back to factory stock webOS:
   single source of truth. Earlier revisions duplicated the HTML inside a
   heredoc in `debloat_home.sh`; do not reintroduce that, it drifts.
 - `tools/build_launcher_ipk.py` packages `launcher/` into
-  `wwwroot/wolfdenos.ipk`. `tools/build_icon.py` and `tools/build_banner.py`
-  generate artwork. `tools/patch_libapp.py` rewrites strings inside LG's
-  compiled Flutter library.
+  `wwwroot/wolfdenos.ipk`. `tools/build_icon.py` generates the app icon, and
+  `tools/build_banner.py` builds LG's own Home banner assets -- pass
+  `--image <picture>` for a seasonal background and `--crop-y` to choose which
+  band of it survives the crop into those wide strips.
+  `tools/patch_libapp.py` rewrites strings inside LG's compiled Flutter
+  library. (`tools/build_overlay_ipk.py` belongs to the abandoned overlay; see
+  the dead-end section below.)
 - `tools/dev_launcher.py` serves `launcher/` on the laptop with a
   `PalmServiceBridge` stub backed by the real launch-point snapshot, so the UI
   can be iterated in a browser without deploying. **Use this.** A deploy cycle
@@ -113,6 +124,21 @@ To revert all modifications back to factory stock webOS:
 - `python3 wolfdenOS.py --debug --webos-version 10 <ip>` deploys. The payload
   POSTs its own stdout back to the laptop (`--log-wait` holds the server open),
   which is the only reason any of the findings below were discoverable.
+- `tools/tv_shell.py` runs a command on the TV over Homebrew Channel's telnet
+  port and prints the output, and `--pull` copies a file back. A deploy is
+  minutes; this is seconds, and it is how everything in "Day 3" below was
+  found. Deploys still go through `wolfdenOS.py` -- this is for looking.
+
+  ```sh
+  python3 tools/tv_shell.py 'mount | grep /usr'
+  python3 tools/tv_shell.py --pull /tmp/shot.png -o shot.png
+  ```
+
+  Two things make it work at all, both learned the hard way. The telnet tty
+  truncates input lines past a couple of hundred characters, so the script is
+  sent as short base64 chunks and reassembled on the TV. And a script piped
+  into `sh` inherits the spent pipe as stdin, which makes `luna-send` exit 0
+  with no reply -- it has to run from a file with stdin closed.
 
 ---
 
@@ -373,6 +399,316 @@ on-subnet too, so it is not purely a latency effect.
 
 ---
 
+## Day 3: The TV Was Never Offline
+
+The Home screen's hero banner kept showing LG's "connect to a network" card --
+the sentence, the art and a **Network Settings** button that we had blanked to
+an empty rounded box. Blanking the label was treating the symptom.
+
+`connectionmanager/getStatus` explains it:
+
+```
+"onInternet":"no", "isInternetConnectionAvailable":false
+```
+
+on a TV that was streaming YouTube at the time. webOS decides this with
+connman's online check, and `/etc/connman/main.conf` says what it probes:
+
+```
+Ipv4StatusUrl=http://lgtvonline.lge.com/
+Ipv6StatusUrl=http://lgtvonline.lge.com/
+TakeDnsIpResolutionAsOnline=true
+```
+
+`lgtvonline.lge.com` does not resolve. Not sinkholed by us -- `NXDOMAIN`, the
+host is simply gone. So every webOS 25 TV on this firmware believes it is
+offline, and the Home screen has been drawing the no-network card over it.
+
+The fix is three pieces, all in `apply.sh`:
+
+1. A three-line node server on `127.0.0.1:80` answering `200 OK`. node ships
+   with webOS at `/usr/bin/node`; busybox here has no `httpd` applet.
+2. `/etc/connman/main.conf` rewritten to probe `http://127.0.0.1/` and
+   bind-mounted over the read-only original, the same trick as `/etc/hosts`.
+   It is generated from the live file, so the rest of LG's config carries over.
+3. A delayed `systemctl restart connman`, because connman reads main.conf once
+   at start and is long up by the time `init.d` runs. Wifi drops and
+   reassociates in about twenty seconds.
+
+No DNS lookup, no outbound request, and the check passes whether or not the TV
+can reach anything of LG's. Afterwards: `onInternet":"yes"`.
+
+What this does **not** do is remove the button. Coming online swaps the card
+from the no-network variant to a promo variant, so the box now reads "Go to
+Apps". The hero banner draws a card whenever it has no ad content to show, and
+the card is compiled Flutter layout -- neither `home.xml` nor the i18n strings
+can take it away:
+
+- Deleting `<item id="herobanner">` from `home.xml` blanks the entire screen,
+  app row included.
+- Collapsing it to `itemHeight="2"` moves the app row to the top but the card
+  still draws, now overlapping the tiles.
+- Blanking the label leaves the box outline, because the button is drawn
+  regardless of its text.
+
+The remaining route is to give the banner content of our own: stand up a luna
+service answering `requestBannerInfoWithoutContextIndex` with our own payload,
+the way `hbchannel` registers its service. That is the next real piece of work
+on this screen.
+
+### Nothing under `/usr` can be deleted
+
+```
+/dev/mmcblk0p27 on / type squashfs (ro,relatime)
+overlay on /usr type overlay (ro,relatime,lowerdir=/overlay/bsppart/bsp/usr:/usr)
+```
+
+`/` is squashfs and `/usr` is a read-only overlay. All 148 system apps in
+`/usr/palm/applications` are on it, and `appInstallService/dev/remove` only
+handles apps installed under `/media/developer`. Hard deletion needs a reflash.
+
+What works instead is masking: an empty directory bind-mounted over each app's
+directory, so SAM finds no `appinfo.json` and the app cannot start. 21 are
+masked (`mask_bloat_apps`), promo and ad containers only. The ACR apps and the
+per-input overlay containers are deliberately left alone -- they sit in the
+HDMI input path.
+
+**Masking does not unregister anything.** Verified after a reboot: SAM still
+answers `getAppInfo` for every masked app, because it scans before
+`/var/lib/webosbrew/init.d` runs. The apps are unlaunchable, not absent.
+
+Their tiles are a separate problem, and the earlier reading of it was wrong.
+The launch-point list looked clean for days -- 15 entries, no LG promo tiles --
+and that was taken as proof the `removeLaunchPoint` sweep worked. It was not.
+It was the offline state hiding them. The moment the TV came online, Alexa,
+Camera, Home Hub, Always Ready, Media Player, Multi View, Sports, the content
+store, the browser and LG Channels all came back, and `removeLaunchPoint`
+answers:
+
+```
+{"errorCode":1,"returnValue":false,"errorText":"this launch point cannot be removable"}
+```
+
+System tiles cannot be removed through that API on webOS 25. `updateLaunchPoint`
+accepts `removable: true` and returns `returnValue: true`, but the removal then
+fails one layer deeper with `"com.webos.app.discovery is not removable"`. And
+masking the app directory does not take the tile away either -- SAM keeps
+listing it.
+
+**The right call is on a different service.** LG's own Home Edit screen hides
+tiles through `com.webos.service.homelaunchpoints`, not through
+`applicationManager`, and it accepts every one of them:
+
+```
+luna://com.webos.service.homelaunchpoints/hideLaunchPoint
+    {"launchPointId":"com.webos.app.discovery_default"}   -> {"returnValue":true}
+```
+
+19 tiles are hidden this way on every boot (`prune_launch_points`). The app row
+is now the streaming apps, live TV, Homebrew Channel and wolf OS, with the TV
+online. Two sibling methods exist and are worth knowing about:
+`unhideLaunchPoint` to put one back, and `listAvailableLaunchPoints` to see
+what is hideable.
+
+Three of the apps are not under `/usr/palm/applications` at all, which is why
+they survived every earlier sweep:
+
+| App | Lives on |
+| --- | --- |
+| `com.webos.app.discovery` (content store) | `/mnt/otncabi/usr/palm/applications` |
+| `com.webos.app.browser` | `/mnt/otncabi/usr/palm/applications` |
+| `com.webos.app.lgchannels` | `/media/system/apps/usr/palm/applications` |
+
+`mask_bloat_apps` walks all four app roots, which makes these apps
+unlaunchable; `prune_launch_points` takes their tiles off the row. Masking
+excludes `com.webos.app.adoverlayex` deliberately -- see the pitfall below.
+
+### Ad and telemetry survey
+
+State of the TV after the earlier passes, read off the device rather than
+assumed:
+
+| Surface | State |
+| --- | --- |
+| Launch points | 15, after `hideLaunchPoint` on 19 tiles; the earlier clean list was the offline state, not a sweep |
+| `livePlus` (ACR) | `off` |
+| `com.webos.service.admanager` | `AD.ERR.00` on every call; four endpoints patched to dead URIs |
+| `com.webos.service.acr` | on disk, not running |
+| `rdxd` (crash upload) | enabled but inactive; `apply.sh` kills it each boot |
+| `uploadd` | running, LG's generic uploader |
+| `kadpd` | running, LG's ad platform daemon |
+| `/etc/hosts` sinkhole | effective through `getaddrinfo` -- `ngfts.lge.com` resolves to `127.0.0.1` |
+
+Two gaps found and closed. The sinkhole was IPv4-only while the TV holds a
+global IPv6 address and asks for AAAA records, so every blocked host was still
+reachable over v6; `::` twins are now in `hosts.block`. And `nslookup` is
+useless for checking any of this -- it queries the resolver directly and never
+reads `/etc/hosts`. Use `ping`, which goes through `getaddrinfo`.
+
+`kadpd` and `uploadd` are still running. Neither can be masked persistently:
+`/etc` is read-only, so `systemctl disable` cannot write, and killing them at
+boot is all `apply.sh` can do.
+
+---
+
+## The Home Banner: What the TV Actually Shows
+
+The seasonal background is set by replacing LG's own `bg_banner_img.png` (and
+its `_wee` and `_network` variants) inside the bind-mounted asset tree. That is
+an edit of the Home screen rather than a layer over it, and it needs no second
+app.
+
+The stock assets are all the same shape and none of them is 16:9:
+
+| Asset size | Ratio |
+| --- | --- |
+| 1264x326 | 3.88:1 |
+| 1746x450 | 3.88:1 |
+| 1896x489 | 3.88:1 |
+| 3492x900 | 3.88:1 |
+| 3792x978 | 3.88:1 |
+
+Cropping a 16:9 photograph into 3.88:1 throws away more than half its height,
+which is how the pumpkins fell out of the Halloween art. But that crop was
+never necessary, and the reason is worth measuring rather than guessing.
+
+A calibration image was built at every stock size -- vertical bands labelled
+`x0`..`x100` across the width, rules every 10% of height, and three true
+circles -- then put on screen and captured. The result:
+
+- **The circles came back round.** Nothing is stretched; the asset keeps its
+  aspect ratio.
+- **The visible window ran from about x22 to x77** -- the centre **55%** of the
+  asset's width, cropped equally either side, at full height.
+- 0.55 x 3.88:1 = **2.13:1**, which is exactly the shape of the screen area
+  between the top and the app row.
+
+So only the middle 55% of the asset is ever seen, and the picture that has to
+fill it is **2.13:1**, not 3.88:1 and not 16:9. `build_from_image` fits the
+source to that window and fills the dead margins either side with a blurred
+stretch of the same picture, so nothing jarring appears if another resolution
+shows slightly more.
+
+**Supply seasonal artwork at 2.13:1** -- 3840x1800 is a good target, since the
+visible part of the largest asset is 0.55 x 3792 = 2086px wide and anything
+smaller gets upscaled. A 16:9 source works too and loses about 17% of its
+height; `--crop-y` chooses which band survives (0.0 top, 1.0 bottom).
+
+```sh
+python3 tools/build_banner.py --image wwwroot/season-halloween.jpg --crop-y 0.5
+```
+
+Keep the right-hand side quiet: LG draws its own headline and button there, and
+no framing moves the art away from them while that card exists.
+
+---
+
+## Dead End: The Home-Screen Overlay
+
+**Not shipped.** `overlay/` and `tools/build_overlay_ipk.py` are kept because
+what they proved is worth keeping, but nothing installs them and the TV does
+not run them. The approach was abandoned on purpose: an overlay is a second
+app drawn on top of LG's Home, not an edit of it, and that shows -- a sliver of
+LG's own banner stayed visible underneath, focus behaved oddly, and anything
+that dropped the overlay left the original Home screen looking untouched,
+because it was. The seasonal background is now set in LG's own banner assets
+instead, which is a real edit and needs no second app.
+
+What it cost: the clock and date. Those were only possible because the overlay
+was our own web page. LG's Home draws no clock, and adding a widget to a
+compiled Dart snapshot is not something string patching reaches.
+
+The findings below still hold and are the reason this section survives.
+
+The hero banner's promo card -- a headline and a button under it -- is the last
+thing on the Home screen we had no handle on. It is compiled Flutter layout,
+and all three obvious attacks were tried on the device and failed:
+
+| Attempt | Result |
+| --- | --- |
+| Delete `<item id="herobanner">` from `home.xml` | Whole screen blank, app row included |
+| Collapse it to `itemHeight="2"` | Card still drawn, now on top of the tiles |
+| Blank its i18n string | Empty outlined box where the button was |
+
+So it is covered rather than removed. `overlay/` is an ordinary web app with
+two fields that matter:
+
+```json
+"transparent": true,
+"defaultWindowType": "overlay"
+```
+
+which puts it above Home **without taking the foreground** --
+`getForegroundAppInfo` still answers `com.webos.app.home` with the overlay
+drawn. The panel spans the top 82% of the screen, stopping just above the app
+row, so the tiles stay visible and focusable. Seasonal artwork fills it and the
+clock and date sit top right.
+
+Note what is *not* in that manifest: `trustLevel`. LG's own overlays set it to
+`"trusted"`, and copying that field is the bug that cost hours on the launcher
+-- SAM silently refuses to register a dev app that carries it, with no error
+anywhere. `tools/build_overlay_ipk.py` refuses to build if it reappears.
+
+### Two things an overlay cannot do
+
+**It cannot ask webOS what is in the foreground.** `PalmServiceBridge` exists
+in the app and the call is accepted, then comes back:
+
+```
+{"returnValue":false,"errorCode":-1,
+ "errorText":"Denied method call \"getForegroundAppInfo\" for category \"/\""}
+```
+
+The permission comes from `trustLevel: "trusted"`, which we cannot have. The
+way round it is to have the TV tell the app instead of the app asking the TV:
+the node server `apply.sh` already runs for the connectivity probe holds the
+luna subscription as root and publishes the answer on `127.0.0.1/foreground`,
+and the overlay polls that every two seconds. The page fails closed -- any
+answer that is not "Home is in front" hides the panel, so a dead server leaves
+the screen alone rather than covering whatever is on it.
+
+**It does not stay running by itself.** webOS reclaims a backgrounded web app,
+and nothing relaunches it: the overlay came up at boot, was gone forty minutes
+later, and the Home screen was back to LG's own banner with no sign anything
+had failed. `getAppStatus` is no help -- it answers `"launchable"` whether the
+app is running or not.
+
+The same node server handles it, in two ways. It relaunches the overlay each
+time Home comes to the front, and, because the overlay polls `/foreground`
+every two seconds, it treats silence as death: no request for fifteen seconds
+while Home is in front means the page is gone, so relaunch it. Using the
+page's own traffic as the liveness signal avoids restarting an overlay that is
+perfectly alive, which a plain timer would do constantly.
+
+**It cannot play video.** A `<video>` element punches a flat white rectangle
+through the surface the moment the element exists -- at `opacity: 0`, playing
+or paused, with the app's own `transparent: true` honoured, and with a file
+that plays fine in the launcher. Creating it lazily only moves when the
+rectangle appears. LG's one overlay that does show video,
+`com.webos.app.overlaycontainer`, asks for a video layer by name:
+
+```json
+"windowGroup": { "owner": false, "name": "com.webos.app.livetv",
+                 "clientInfo": { "layer": "videoAcrLayer" } }
+```
+
+A dev-installed app has no way to claim that layer, so the background is a
+still image. This was worth about an hour, and the white rectangle looks
+exactly like a page that failed to load, which is the wrong place to start
+debugging.
+
+### Artwork
+
+One image per season in `wwwroot/season-<name>.jpg`, 1920x1080 or larger, 16:9.
+`object-fit: cover` anchored to the top, so roughly the bottom fifth is cropped
+by the app row -- keep the subject in the upper two-thirds. The top right is
+where the clock sits; there is a radial scrim behind it, but a busy corner
+still fights the text. The file is served at deploy time and copied into the
+app directory by `apply.sh`, because `dev/install` wipes the app directory on
+every deploy.
+
+---
+
 ## Safety: `apply.sh` Runs on Every Boot
 
 A bad change re-applies itself at startup, so a power cycle does not clear it.
@@ -392,6 +728,16 @@ otherwise.
 
 Recovery note: deploys run through `com.webos.app.adoverlayex`, not the Home
 app, so a fix can still be pushed with the Home screen broken.
+
+**Which is exactly why that app must never be masked.** It was in the first
+version of `mask_bloat_apps` -- it is an ad overlay, it looked like bloat --
+and masking worked perfectly: the next deploy sat on *"waiting for TV to pull
+all payload files"* forever, because the staging app it launches had no
+`index.html` any more. Nothing in the deploy output says why. The TV was only
+recoverable because telnet was open; without it the only way back would have
+been the USB kill switch. Masking anything on the recovery path turns a
+reversible change into a one-way door, and the list in `apply.sh` carries a
+comment saying so.
 
 ---
 

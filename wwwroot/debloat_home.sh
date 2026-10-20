@@ -23,7 +23,14 @@ if [ "${1}" = "--revert" ] || [ "${1}" = "--uninstall" ]; then
     umount /usr/palm/applications/com.webos.app.home/resources 2>/dev/null || true
     umount /etc/hosts 2>/dev/null || true
     umount /usr/palm/applications/com.webos.app.home/lib/libapp.so 2>/dev/null || true
-    rm -rf /tmp/weboshome-merged /tmp/hosts.slopbro
+    umount /etc/connman/main.conf 2>/dev/null || true
+    for masked_app in /usr/palm/applications/* \
+                      /mnt/otncabi/usr/palm/applications/* \
+                      /media/system/apps/usr/palm/applications/*; do
+        mount | grep -q " ${masked_app} " && umount "${masked_app}" 2>/dev/null
+    done
+    pkill -f /tmp/wolfden/probe.js 2>/dev/null || true
+    rm -rf /tmp/weboshome-merged /tmp/hosts.slopbro /tmp/wolfden
     pkill -f com.webos.app.home 2>/dev/null || true
     echo "[+] Reverted to stock webOS."
     exit 0
@@ -429,6 +436,32 @@ cat > "${MOD_DIR}/hosts.block" << 'EOF'
 0.0.0.0 snu.lge.com
 0.0.0.0 su.lge.com
 0.0.0.0 su-ssl.lge.com
+#
+# IPv6 twins. The TV holds a global v6 address and asks for AAAA records, so an
+# A-only sinkhole leaves every one of these reachable over v6.
+:: ad.lgappstv.com
+:: lgad.cjpowercast.com
+:: yumenetworks.com
+:: smartclip.net
+:: smartclip.com
+:: us.info.lgsmartad.com
+:: us.ad.lgsmartad.com
+:: info.lgsmartad.com
+:: ad.lgsmartad.com
+:: cdpbeacon.lgtvcommon.com
+:: cdpsvc.lgtvcommon.com
+:: homeprv.lgtvcommon.com
+:: nudge.lgtvcommon.com
+:: rdx2.lgtvsdp.com
+:: us.rdx2.lgtvsdp.com
+:: eu.rdx2.lgtvsdp.com
+:: AIC.ngfts.lge.com
+:: aic.ngfts.lge.com
+:: aic-ngfts.lge.com
+:: ngfts.lge.com
+:: snu.lge.com
+:: su.lge.com
+:: su-ssl.lge.com
 EOF
 
 # 3. Write persistent boot script (${MOD_DIR}/apply.sh)
@@ -533,6 +566,76 @@ if [ -f "${MOD_DIR}/hosts.block" ]; then
     cp /etc/hosts /tmp/hosts.slopbro
     grep -q "wolfdenOS" /tmp/hosts.slopbro || cat "${MOD_DIR}/hosts.block" >> /tmp/hosts.slopbro
     mount --bind /tmp/hosts.slopbro /etc/hosts 2>/dev/null || true
+fi
+
+# A2. Answer webOS's own connectivity check locally.
+#
+# The Home screen's hero banner shows a "connect to a network" card -- the
+# sentence, the art and the Network Settings button -- whenever
+# connectionmanager reports onInternet:"no". It reported exactly that with the
+# TV online and YouTube streaming, because connman probes
+# http://lgtvonline.lge.com/ (see Ipv4StatusUrl in /etc/connman/main.conf) and
+# that host no longer resolves at all. Nothing we blocked caused it; LG's probe
+# target is simply gone.
+#
+# So the probe is pointed at the TV itself and answered by a three-line node
+# server. No DNS, no outbound request, and the check passes whether or not the
+# TV can reach anything of LG's.
+start_online_probe() {
+    [ -x /usr/bin/node ] || { alog "no node; connectivity probe skipped"; return 1; }
+    mkdir -p /tmp/wolfden 2>/dev/null || true
+    cat > /tmp/wolfden/probe.js << 'PROBE_EOF'
+require('http').createServer(function (req, res) {
+  res.writeHead(200, { 'Content-Type': 'text/html', 'Content-Length': 3 });
+  res.end('OK\n');
+}).listen(80, '127.0.0.1');
+PROBE_EOF
+    pkill -f /tmp/wolfden/probe.js 2>/dev/null || true
+    nohup /usr/bin/node /tmp/wolfden/probe.js >/tmp/wolfden/probe.log 2>&1 &
+    sleep 1
+    probe_code="$(curl -s -m 4 -o /dev/null -w '%{http_code}' http://127.0.0.1/ 2>/dev/null)"
+    alog "connectivity probe responder: HTTP ${probe_code:-none}"
+    [ "${probe_code}" = "200" ]
+}
+
+# /etc is read-only, so the rewritten config is bind-mounted the same way
+# /etc/hosts is. It is generated from the live file rather than shipped, so an
+# LG update to the rest of main.conf is carried over untouched.
+point_connman_at_probe() {
+    conf="/etc/connman/main.conf"
+    [ -f "${conf}" ] || return 1
+    grep -q "lgtvonline" "${conf}" 2>/dev/null || {
+        alog "connman main.conf already points elsewhere; left alone"
+        return 0
+    }
+    sed -e 's|^Ipv4StatusUrl=.*|Ipv4StatusUrl=http://127.0.0.1/|' \
+        -e 's|^Ipv6StatusUrl=.*|Ipv6StatusUrl=http://127.0.0.1/|' \
+        "${conf}" > /tmp/wolfden/connman-main.conf 2>/dev/null || return 1
+    mount --bind /tmp/wolfden/connman-main.conf "${conf}" 2>/dev/null || return 1
+    alog "connman status URL repointed at the local probe"
+}
+
+# connman reads main.conf once, at start, and it is long since up by the time
+# init.d runs -- so the override does nothing until the daemon is restarted.
+# Verified on the device: wifi drops and reassociates within ~20s and the check
+# then passes. Delayed and backgrounded so it does not happen in the middle of
+# the rest of the boot.
+restart_connman_later() {
+    (
+        sleep 45
+        systemctl restart connman >/dev/null 2>&1
+        sleep 25
+        alog "connectivity after connman restart: $(luna-send -w 6000 -n 1 \
+            'luna://com.webos.service.connectionmanager/getStatus' '{}' 2>&1 \
+            | tr ',' '\n' | grep -E 'onInternet|isInternet' | tr '\n' ' ')"
+        # Coming online is what re-creates the store, browser and LG Channels
+        # tiles, so the sweep has to run after it, not before.
+        prune_launch_points
+    ) &
+}
+
+if start_online_probe; then
+    point_connman_at_probe && restart_connman_later
 fi
 
 # B. Bind-mount customized core webOS 10.3.0 Flutter Home assets (wolf OS + stock image removed)
@@ -733,6 +836,93 @@ if [ -d "${FLUTTER_ASSETS}" ]; then
     pkill -f com.webos.app.home 2>/dev/null || true
 fi
 
+# B2. Mask the promo and ad apps.
+#
+# They cannot be deleted: / is squashfs and /usr is a read-only overlay, so
+# nothing under /usr/palm/applications can be removed without reflashing. An
+# empty directory bind-mounted over each one is as close as this gets -- SAM
+# finds no appinfo.json and the app cannot start. Mounts do not survive a power
+# cycle, so a bad entry here undoes itself at the next boot.
+#
+# The ACR apps (acrcomponent, acrhdmi1-4) and the per-input overlay containers
+# are deliberately absent: they sit in the HDMI input path and masking them
+# risks the inputs themselves. ACR is off at the settings level instead.
+#
+# com.webos.app.adoverlayex is absent for a different and more important
+# reason: wolfdenOS.py stages every deploy through it. Masking it worked
+# exactly as intended and left the TV with no way to receive a fix -- the
+# deploy sat on "waiting for TV to pull all payload files" until the mount was
+# removed by hand over telnet. It is closed at each boot below instead.
+# com.webos.app.adoverlay is left alone for the same reason, being its sibling.
+mask_bloat_apps() {
+    mkdir -p /tmp/wolfden/empty 2>/dev/null || true
+    masked=0
+    for bloat in com.webos.app.discovery com.webos.app.browser \
+                 com.webos.app.lgchannels com.webos.app.videoads \
+                 com.webos.app.cmp-client \
+                 com.webos.app.fooddelivery com.webos.app.fooddeliveryex \
+                 com.webos.app.lifeonscreen com.webos.app.homeconnect \
+                 com.webos.app.mediadiscovery com.webos.app.sportsteamsettings \
+                 com.webos.app.lgchannels com.webos.app.newandhot \
+                 com.webos.app.premium com.webos.app.store-demo \
+                 com.webos.app.sync-demo com.webos.app.multiviewsettings \
+                 com.webos.app.camera com.lge.app.viewster \
+                 amazon.alexa.view amazon.alexapr yandex.alice; do
+        # Not every app lives under /usr/palm/applications. The content store
+        # and the browser are on /mnt/otncabi and LG Channels is under
+        # /media/system/apps, which is why removeLaunchPoint was the only
+        # handle on them for so long -- and it refuses system tiles outright
+        # ("this launch point cannot be removable").
+        for app_root in /usr/palm/applications \
+                        /mnt/otncabi/usr/palm/applications \
+                        /media/system/apps/usr/palm/applications \
+                        /media/cryptofs/apps/usr/palm/applications; do
+            app_dir="${app_root}/${bloat}"
+            [ -d "${app_dir}" ] || continue
+            mount | grep -q " ${app_dir} " && continue
+            if mount --bind /tmp/wolfden/empty "${app_dir}" 2>/dev/null; then
+                masked=$((masked + 1))
+            fi
+        done
+        luna-send -n 1 -a com.webos.app.home \
+            'luna://com.webos.applicationManager/removeLaunchPoint' \
+            "{\"launchPointId\":\"${bloat}_default\"}" >/dev/null 2>&1 || true
+    done
+    alog "masked ${masked} promo/ad app directories"
+}
+
+mask_bloat_apps
+
+# Tiles for apps we do not want, whether or not the app is on disk.
+#
+# This is com.webos.service.homelaunchpoints, not applicationManager. The
+# obvious call, applicationManager/removeLaunchPoint, refuses every system
+# tile with "this launch point cannot be removable" -- and the tile list
+# looked clean for days only because the TV wrongly believed it was offline,
+# which hides them. hideLaunchPoint is what LG's own Home Edit screen uses and
+# it accepts all of them.
+prune_launch_points() {
+    hidden=0
+    for bloat in com.webos.app.discovery com.webos.app.browser \
+                 com.webos.app.lgchannels com.webos.app.videoads \
+                 com.webos.app.lifeonscreen com.webos.app.homeconnect \
+                 com.webos.app.mediadiscovery com.webos.app.sportsteamsettings \
+                 com.webos.app.newandhot com.webos.app.premium \
+                 com.webos.app.multiviewsettings com.webos.app.camera \
+                 com.lge.app.viewster com.lgshop.app love.fubo com.rakuten.tv \
+                 amazon.alexa.view amazon.alexapr yandex.alice; do
+        if luna-send -w 3000 -n 1 -a com.webos.app.home \
+                'luna://com.webos.service.homelaunchpoints/hideLaunchPoint' \
+                "{\"launchPointId\":\"${bloat}_default\"}" 2>&1 \
+                | grep -q '"returnValue":true'; then
+            hidden=$((hidden + 1))
+        fi
+    done
+    alog "hid ${hidden} unwanted launch points"
+}
+
+prune_launch_points
+
 # C. Enforce Luna privacy & home settings
 luna-send -n 1 'luna://com.webos.settingsservice/setSystemSettings' '{"category":"option","settings":{"livePlus":"off","homePromotion":"off","homeAutoLaunch":"off","personalizedAd":"off"}}' >/dev/null 2>&1 || true
 
@@ -775,10 +965,12 @@ else
     alog "VERDICT: SAM does NOT know tld.wolfdenos.home - app is not installed"
 fi
 
-# Close the staging overlay (com.webos.app.adoverlayex) cleanly so it never shows error -102,
-# and immediately open the wolfdenOS Purplish Glass Dock dashboard!
+# Close the staging overlay (com.webos.app.adoverlayex) cleanly so it never
+# shows error -102.
 luna_try "closeByAppId adoverlayex" 'luna://com.webos.applicationManager/closeByAppId' '{"id":"com.webos.app.adoverlayex"}'
-luna_try "launch wolfdenos" 'luna://com.webos.applicationManager/launch' '{"id":"tld.wolfdenos.home"}'
+
+# The launcher is NOT launched here any more. The work has moved to the LG Home
+# screen itself; our app stays installed as a tile and opens only when chosen.
 
 # Reached the end intact, so this boot counts as healthy.
 echo 0 > "${BOOT_COUNT_FILE}" 2>/dev/null || true
@@ -804,42 +996,47 @@ done
 # "not exist". appInstallService/dev/install is the only route that registers an
 # app, and it is how autoroot.sh installs Homebrew Channel. The install persists
 # across reboots, so this runs at deploy time only -- apply.sh does not reinstall.
-install_launcher_ipk() {
+# install_ipk <app id> <ipk filename> <app directory>
+install_ipk() {
+    ipk_app_id="${1}"
+    ipk_name="${2}"
+    ipk_app_dir="${3}"
+
     case "${WOLFDEN_BASE_URL}" in
         http://*|https://*) ;;
         *)
-            log "no base URL was substituted; cannot fetch launcher ipk"
+            log "no base URL was substituted; cannot fetch ${ipk_name}"
             return 1
         ;;
     esac
 
-    ipk_url="${WOLFDEN_BASE_URL}wolfdenos.ipk"
-    ipk_path="/media/internal/downloads/wolfdenos.ipk"
+    ipk_url="${WOLFDEN_BASE_URL}${ipk_name}"
+    ipk_path="/media/internal/downloads/${ipk_name}"
     rm -f "${ipk_path}" 2>/dev/null || true
 
-    # This script writes WOLF_DIR itself earlier in the run, so appinstalld
-    # finds the target directory already populated and answers with
+    # This script writes the app directory itself earlier in the run, so
+    # appinstalld finds the target already populated and answers with
     # downgrade:true, unpacking nothing while still reporting "installed".
     # Clear both the directory and any stale registry entry so the install
     # is a genuinely fresh one.
     luna-send -w 5000 -n 1 'luna://com.webos.appInstallService/dev/remove' \
-        '{"id":"tld.wolfdenos.home","subscribe":false}' >/dev/null 2>&1 || true
-    rm -rf "${WOLF_DIR}" 2>/dev/null || true
+        "{\"id\":\"${ipk_app_id}\",\"subscribe\":false}" >/dev/null 2>&1 || true
+    rm -rf "${ipk_app_dir}" 2>/dev/null || true
     sleep 1
 
-    if ! curl -s -m 60 -o "${ipk_path}" "${ipk_url}"; then
-        log "launcher ipk download FAILED from ${ipk_url}"
+    if ! curl -s -m 120 -o "${ipk_path}" "${ipk_url}"; then
+        log "${ipk_name} download FAILED from ${ipk_url}"
         return 1
     fi
     if [ ! -s "${ipk_path}" ]; then
-        log "launcher ipk downloaded but is empty: ${ipk_path}"
+        log "${ipk_name} downloaded but is empty: ${ipk_path}"
         return 1
     fi
-    log "launcher ipk downloaded ($(wc -c < "${ipk_path}" 2>/dev/null) bytes)"
+    log "${ipk_name} downloaded ($(wc -c < "${ipk_path}" 2>/dev/null) bytes)"
 
     # dev/install is subscription-based: a plain -n 1 returns before the install
     # finishes, so read the subscription until it reports a terminal state.
-    fifo_path="/tmp/wolfden_install_fifo"
+    fifo_path="/tmp/wolfden_install_fifo_${ipk_app_id}"
     rm -f "${fifo_path}" 2>/dev/null || true
     if ! mkfifo "${fifo_path}" 2>/dev/null; then
         log "could not create install fifo"
@@ -870,15 +1067,15 @@ install_launcher_ipk() {
     # so ask SAM whether the app actually exists now.
     sleep 2
     if luna-send -w 3000 -n 1 'luna://com.webos.applicationManager/getAppInfo' \
-            '{"id":"tld.wolfdenos.home"}' 2>&1 | grep -q '"returnValue":true'; then
+            "{\"id\":\"${ipk_app_id}\"}" 2>&1 | grep -q '"returnValue":true'; then
         return 0
     fi
-    log "dev/install reported success but SAM still does not know the app"
+    log "dev/install reported success but SAM still does not know ${ipk_app_id}"
     return 1
 }
 
 LAUNCHER_INSTALLED=0
-if install_launcher_ipk; then
+if install_ipk tld.wolfdenos.home wolfdenos.ipk "${WOLF_DIR}"; then
     LAUNCHER_INSTALLED=1
     log "launcher registered with SAM as tld.wolfdenos.home"
 else

@@ -63,6 +63,64 @@ def run(cmd):
     return proc
 
 
+# How much of a banner asset the TV actually shows.
+#
+# Measured, not guessed: a calibration grid with labelled bands and true
+# circles was built at every stock size and put on screen. The circles came
+# back round, so nothing is stretched, and the visible window ran from 22% to
+# 77% of the asset's width with its full height -- the centre 55%, cropped
+# equally either side. 0.55 x 3.88:1 gives 2.13:1, which is exactly the shape
+# of the area between the top of the screen and the app row.
+#
+# This is why cropping a 16:9 source into the raw 3.88:1 strip threw away more
+# than half the picture for nothing. Only the middle has to carry it.
+VISIBLE_FRACTION = 0.55
+
+
+def source_size(path):
+    out = run(["magick", "identify", "-format", "%w %h", path]).stdout
+    w, h = out.decode().split()
+    return int(w), int(h)
+
+
+def build_from_image(out_path, width, height, source, crop_y):
+    """
+    Fill one stock-sized strip from a photograph.
+
+    The picture is fitted to the visible window -- the centre 55% of the strip
+    at full height, about 2.13:1 -- and the dead margins either side are filled
+    with a blurred stretch of the same picture, so anything that does bleed in
+    at another resolution still looks like part of the image.
+
+    crop_y picks which band of the source survives the fit, 0.0 being the top
+    and 1.0 the bottom.
+    """
+    vis_w = int(round(width * VISIBLE_FRACTION))
+    src_w, src_h = source_size(source)
+
+    # Scale to cover the visible window, then slide vertically.
+    scale_w = vis_w if (vis_w / float(height)) > (src_w / float(src_h)) else None
+    if scale_w:
+        scaled_w, scaled_h = vis_w, int(round(vis_w * src_h / float(src_w)))
+        resize = "%dx" % vis_w
+    else:
+        scaled_h, scaled_w = height, int(round(height * src_w / float(src_h)))
+        resize = "x%d" % height
+    off_y = max(0, int(round((scaled_h - height) * crop_y)))
+    off_x = max(0, (scaled_w - vis_w) // 2)
+
+    run([
+        "magick",
+        "(", source, "-resize", "%dx%d!" % (width, height),
+        "-blur", "0x30", "-modulate", "70", ")",
+        "(", source, "-resize", resize,
+        "-crop", "%dx%d+%d+%d" % (vis_w, height, off_x, off_y), "+repage", ")",
+        "-gravity", "center", "-compose", "over", "-composite",
+        "-strip", out_path,
+    ])
+    return os.path.getsize(out_path)
+
+
 def build_one(out_path, width, height, text, draw_text):
     args = [
         "magick",
@@ -97,15 +155,21 @@ def build_one(out_path, width, height, text, draw_text):
     return os.path.getsize(out_path)
 
 
-def build(out_dir, text, draw_text):
+def build(out_dir, text, draw_text, source=None, crop_y=1.0):
     base = os.path.join(out_dir, "home-banner")
     for width, height in SIZES:
         path = "%s-%dx%d.png" % (base, width, height)
-        size = build_one(path, width, height, text, draw_text)
+        if source:
+            size = build_from_image(path, width, height, source, crop_y)
+        else:
+            size = build_one(path, width, height, text, draw_text)
         print("  %-28s %5dx%-4d %8d bytes"
               % (os.path.basename(path), width, height, size))
     # Generic fallback for any asset whose size we have not measured.
-    build_one(base + ".png", 1920, 1080, text, draw_text)
+    if source:
+        build_from_image(base + ".png", 1920, 1080, source, crop_y)
+    else:
+        build_one(base + ".png", 1920, 1080, text, draw_text)
     print("  %-28s fallback" % "home-banner.png")
     return 0
 
@@ -118,9 +182,19 @@ def main(argv=None):
     # this image, and a baked-in wordmark collided with them.
     parser.add_argument("--text-in-image", dest="draw_text", action="store_true",
                         help="bake the wordmark into the image (overlaps LG's own text)")
+    parser.add_argument(
+        "--image",
+        help="fill the banner from this picture instead of the gradient",
+    )
+    parser.add_argument(
+        "--crop-y", type=float, default=1.0,
+        help="which band of the picture to keep: 0.0 top, 1.0 bottom "
+             "(default 1.0, which is what shows the foreground)",
+    )
     args = parser.parse_args(argv)
     try:
-        return build(args.out_dir, args.text, args.draw_text)
+        return build(args.out_dir, args.text, args.draw_text, args.image,
+                     args.crop_y)
     except RuntimeError as exc:
         print("error: %s" % exc, file=sys.stderr)
         return 1

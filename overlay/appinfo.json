@@ -1,0 +1,18 @@
+{
+  "id": "tld.wolfdenos.overlay",
+  "version": "1.0.0",
+  "vendor": "wolfdenOS",
+  "type": "web",
+  "main": "index.html",
+  "title": "wolf OS Overlay",
+  "icon": "icon.png",
+  "uiRevision": 2,
+  "transparent": true,
+  "visible": false,
+  "lockable": false,
+  "noSplashOnLaunch": true,
+  "disableBackHistoryAPI": true,
+  "defaultWindowType": "overlay",
+  "spinnerOnLaunch": false,
+  "resolution": "1920x1080"
+}

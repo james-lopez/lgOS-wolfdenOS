@@ -1,0 +1,175 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>wolf OS Overlay</title>
+<!--
+Draws over LG's Home screen.
+
+The hero banner's promo card -- the headline and the button under it -- is
+compiled Flutter layout. It cannot be removed from home.xml (deleting the
+item blanks the whole screen, collapsing its height leaves the card drawing on
+top of the app row) and blanking its i18n string leaves an empty outlined box.
+So it is covered instead: this app registers with defaultWindowType "overlay"
+and transparent true, which puts it above Home without taking the foreground,
+and the panel below spans everything down to the app row.
+
+The panel is only shown while Home is actually in front. Without that check it
+would sit over live TV and every app.
+
+The background is a still image and not a video on purpose. A <video> element
+in this surface punches a flat white rectangle through it the moment the
+element exists -- at opacity 0, playing or paused, with "transparent": true
+honoured and the same file that plays fine in the launcher. LG's own overlay
+that does show video (com.webos.app.overlaycontainer) asks for a video layer
+by name in its windowGroup, which a dev-installed app has no way to claim.
+-->
+
+<style>
+  html, body {
+    margin: 0;
+    height: 100%;
+    background: transparent;
+    overflow: hidden;
+  }
+
+  /* Hidden until the foreground subscription says Home is in front. Failing
+     closed matters more than failing open: a panel stuck over live TV is a
+     much worse bug than one that never appears. */
+  #panel {
+    position: fixed;
+    left: 0; right: 0; top: 0;
+    /* Stops just above the app row, which stays visible and focusable. */
+    height: 82%;
+    opacity: 0;
+    transition: opacity 400ms ease;
+    background: #0c0414;
+  }
+  #panel.show { opacity: 1; }
+
+  #still {
+    position: absolute;
+    left: 0; top: 0;
+    width: 100%; height: 100%;
+    object-fit: cover;
+    /* Anchored to the top: the app row crops roughly the bottom fifth of a
+       16:9 image, so the composition has to survive losing it. */
+    object-position: center top;
+  }
+
+  /* Keeps the clock readable over bright artwork without darkening the whole
+     panel. */
+  #scrim {
+    position: absolute;
+    right: 0; top: 0;
+    width: 46%; height: 42%;
+    background: radial-gradient(ellipse at 78% 22%,
+                rgba(0,0,0,.55) 0%, rgba(0,0,0,0) 70%);
+  }
+
+  #clock {
+    position: absolute;
+    top: 52px; right: 78px;
+    text-align: right;
+    font-family: -apple-system, "Helvetica Neue", Arial, sans-serif;
+    color: #fff;
+    text-shadow: 0 2px 20px rgba(0,0,0,.8), 0 0 3px rgba(0,0,0,.9);
+  }
+  #time {
+    font-size: 78px;
+    font-weight: 300;
+    letter-spacing: -1px;
+    line-height: 1;
+  }
+  #date {
+    font-size: 34px;
+    font-weight: 400;
+    opacity: .94;
+    margin-top: 12px;
+  }
+</style>
+</head>
+<body>
+  <div id="panel">
+    <img id="still" src="season.jpg" alt="">
+    <div id="scrim"></div>
+    <div id="clock">
+      <div id="time"></div>
+      <div id="date"></div>
+    </div>
+  </div>
+
+<script>
+(function () {
+  "use strict";
+
+  var HOME_APP_ID = "com.webos.app.home";
+
+  var panel = document.getElementById("panel");
+  var timeEl = document.getElementById("time");
+  var dateEl = document.getElementById("date");
+
+  function tick() {
+    var now = new Date();
+    timeEl.textContent = now.toLocaleTimeString([], {
+      hour: "numeric", minute: "2-digit"
+    });
+    dateEl.textContent = now.toLocaleDateString([], {
+      weekday: "long", month: "long", day: "numeric"
+    });
+  }
+
+  var visible = false;
+  function setVisible(next) {
+    if (next === visible) { return; }
+    visible = next;
+    if (next) {
+      tick();
+      panel.classList.add("show");
+    } else {
+      panel.classList.remove("show");
+    }
+  }
+
+  // Asking webOS directly does not work from here. PalmServiceBridge exists in
+  // this app, but the call comes back
+  //   "Denied method call \"getForegroundAppInfo\" for category \"/\""
+  // because the overlay is a dev-installed app with no granted permissions,
+  // and LG's own overlays get theirs from "trustLevel": "trusted" -- the one
+  // field that, set on a dev app, makes SAM refuse to register it at all.
+  //
+  // So the answer comes from the TV instead of from the app: the small node
+  // server apply.sh already runs for the connectivity probe holds a luna
+  // subscription and publishes the foreground app id on 127.0.0.1. Polling it
+  // costs a request every two seconds against a local socket.
+  var FOREGROUND_URL = "http://127.0.0.1/foreground";
+  var POLL_MS = 2000;
+
+  function pollForeground() {
+    var req = new XMLHttpRequest();
+    req.onreadystatechange = function () {
+      if (req.readyState !== 4) { return; }
+      var res = null;
+      if (req.status === 200) {
+        try { res = JSON.parse(req.responseText); } catch (e) { res = null; }
+      }
+      // Anything other than a clear "Home is in front" hides the panel. If the
+      // server is gone we must not be left covering whatever is on screen.
+      setVisible(!!res && res.appId === HOME_APP_ID);
+    };
+    try {
+      req.open("GET", FOREGROUND_URL + "?t=" + Date.now(), true);
+      req.send();
+    } catch (e) {
+      setVisible(false);
+    }
+  }
+
+  setInterval(tick, 10000);
+  tick();
+  pollForeground();
+  setInterval(pollForeground, POLL_MS);
+})();
+</script>
+</body>
+</html>
