@@ -1,0 +1,18 @@
+{
+  "id": "tld.wolfdenos.qmlhome",
+  "version": "0.1.0",
+  "vendor": "wolfdenOS",
+  "type": "qml",
+  "main": "main.qml",
+  "title": "wolfdenOS",
+  "icon": "icon80.png",
+  "largeIcon": "icon130.png",
+  "iconColor": "#6d28d9",
+  "noSplashOnLaunch": true,
+  "transparent": true,
+  "visible": false,
+  "class": { "hidden": true },
+  "lockable": false,
+  "disableBackHistoryAPI": true,
+  "appCategory": ["home"]
+}

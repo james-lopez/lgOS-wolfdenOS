@@ -49,6 +49,11 @@ REPLACEMENTS = {
     b"Start a new experience with webOS.": b"wolfdenOS",
     # Blanked rather than removed: the button is part of the compiled layout.
     b"Network Settings": b"",
+    # The hero banner's button label. Unlike the two sentences above and unlike
+    # "Network Settings", this one is a Dart string literal in the snapshot
+    # rather than an i18n key, so it can be reached here. Blanking it is the
+    # test of whether the button's outline is drawn independently of its text.
+    b"Go to Apps": b"",
 }
 
 

@@ -9,6 +9,7 @@ set -e
 
 MOD_DIR="/media/developer/apps/usr/palm/applications/tld.slopbro.g3mod"
 WOLF_DIR="/media/developer/apps/usr/palm/applications/tld.wolfdenos.home"
+QMLHOME_DIR="/media/developer/apps/usr/palm/applications/tld.wolfdenos.qmlhome"
 INITD_DIR="/var/lib/webosbrew/init.d"
 INITD_LINK="${INITD_DIR}/49-g3-debloat-home"
 FLUTTER_ASSETS="/usr/palm/applications/com.webos.app.home/data/flutter_assets/assets"
@@ -30,6 +31,10 @@ if [ "${1}" = "--revert" ] || [ "${1}" = "--uninstall" ]; then
         mount | grep -q " ${masked_app} " && umount "${masked_app}" 2>/dev/null
     done
     pkill -f /tmp/wolfden/probe.js 2>/dev/null || true
+    luna-send -w 6000 -n 1 'luna://com.webos.applicationManager/setDefaultApp' \
+        '{"category":"home","appId":"com.webos.app.home"}' >/dev/null 2>&1 || true
+    luna-send -w 8000 -n 1 'luna://com.webos.appInstallService/dev/remove' \
+        '{"id":"tld.wolfdenos.qmlhome","subscribe":false}' >/dev/null 2>&1 || true
     rm -rf /tmp/weboshome-merged /tmp/hosts.slopbro /tmp/wolfden
     pkill -f com.webos.app.home 2>/dev/null || true
     echo "[+] Reverted to stock webOS."
@@ -60,6 +65,11 @@ WOLFDEN_DEPLOY_MARKER="/tmp/wolfden_deploy_active"
 # replacing the patched library). Reset to 0 afterwards: rebooting the TV on
 # every deploy would be obnoxious.
 WOLFDEN_REBOOT_AFTER_DEPLOY=0
+
+# The wolf OS launcher is parked while the work is on LG's own Home screen.
+# Its source stays in launcher/ and the ipk still builds; this only decides
+# whether the TV gets it. Set to 1 to put the tile back.
+WOLFDEN_INSTALL_LAUNCHER=0
 
 remote_log() {
     # Only a deploy has a laptop listening. /tmp is empty after a reboot, so
@@ -469,6 +479,7 @@ cat > "${MOD_DIR}/apply.sh" << 'APPLY_EOF'
 #!/bin/sh
 MOD_DIR="/media/developer/apps/usr/palm/applications/tld.slopbro.g3mod"
 WOLF_DIR="/media/developer/apps/usr/palm/applications/tld.wolfdenos.home"
+QMLHOME_DIR="/media/developer/apps/usr/palm/applications/tld.wolfdenos.qmlhome"
 FLUTTER_ASSETS="/usr/palm/applications/com.webos.app.home/data/flutter_assets/assets"
 HOME_RESOURCES="/usr/palm/applications/com.webos.app.home/resources"
 APPLY_LOG="/tmp/wolfdenos_apply.log"
@@ -511,6 +522,59 @@ luna_try() {
     fi
 }
 
+# Luna bus access for the QML home. appinstalld generates a role for a dev
+# app with exeName set to the app's main.qml -- but the process that actually
+# registers on the bus is /usr/bin/qml-runner, so the hub rejects it and every
+# Service call in the app is silently dead ("Failed to initialize
+# LunaServiceManager instance"). LG's own QML apps are covered by a role for
+# qml-runner itself; a dev app gets nothing. These files are what Homebrew
+# Channel's elevate-service writes for its own service, adapted: a role keyed
+# by appId (qml-runner is a trusted container, so the hub honours that), the
+# "<id>-*" name pattern the Service element actually registers under, and
+# client permissions for every ACG group. dev/install rewrites appinstalld's
+# files, so this runs after every install as well as at boot.
+grant_qmlhome_bus() {
+    ID="tld.wolfdenos.qmlhome"
+    LR="/var/luna-service2-dev"
+    [ -d "${LR}/roles.d" ] || return 0
+    cat > "${LR}/roles.d/${ID}.app.json" << ROLE_EOF
+{
+    "appId": "${ID}",
+    "type": "regular",
+    "allowedNames": ["${ID}", "${ID}-*"],
+    "trustLevel": "",
+    "permissions": [
+        { "service": "${ID}", "outbound": ["*"] },
+        { "service": "${ID}-*", "outbound": ["*"] }
+    ]
+}
+ROLE_EOF
+    printf '{"%s":["all"],"%s-*":["all"]}\n' "${ID}" "${ID}" > "${LR}/client-permissions.d/${ID}.app.json"
+    printf '{"%s*":["all"]}\n' "${ID}" > "${LR}/client-permissions.d/${ID}.root.json"
+    printf '{"id":"%s","version":"0.1.0","roleFiles":["%s/roles.d/%s.app.json"],"roleFilesPrv":["/var/palm/ls2-dev/roles/prv/%s.json"],"roleFilesPub":["/var/palm/ls2-dev/roles/pub/%s.json"],"clientPermissionFiles":["%s/client-permissions.d/%s.app.json","%s/client-permissions.d/%s.root.json"]}\n' \
+        "${ID}" "${LR}" "${ID}" "${ID}" "${ID}" "${LR}" "${ID}" "${LR}" "${ID}" > "${LR}/manifests.d/${ID}.json"
+    for f in "/var/palm/ls2-dev/roles/prv/${ID}.json" "/var/palm/ls2-dev/roles/pub/${ID}.json"; do
+        [ -f "${f}" ] && sed -i 's#"exeName":"[^"]*"#"exeName":"/usr/bin/qml-runner"#' "${f}"
+    done
+    ls-control scan-services >/dev/null 2>&1 || true
+    alog "luna role granted to ${ID}"
+}
+
+# Which app the HOME key opens. LG keeps this in settingsservice as
+# general.defaultApps.home and reads it through applicationManager; it is the
+# mechanism behind its own Senior Home, so it survives reboots on its own.
+# That cuts both ways: a home app that cannot start would stay the home app
+# across power cycles, which is why every exit path below that gives up on the
+# modifications hands HOME back to LG first.
+set_home_app() {
+    if luna-send -w 6000 -n 1 'luna://com.webos.applicationManager/setDefaultApp' \
+            "{\"category\":\"home\",\"appId\":\"${1}\"}" 2>&1 | grep -q '"returnValue":true'; then
+        alog "home app -> ${1}"
+    else
+        alog "setDefaultApp ${1} FAILED"
+    fi
+}
+
 alog "apply.sh starting (pid $$)"
 
 # --- Failsafes -------------------------------------------------------------
@@ -528,6 +592,7 @@ for kill_switch in /tmp/usb/*/*/wolfden-disable /tmp/usb/*/wolfden-disable \
                    /media/internal/wolfden-disable; do
     if [ -e "${kill_switch}" ]; then
         alog "KILL SWITCH found at ${kill_switch}; skipping all modifications"
+        set_home_app com.webos.app.home
         exit 0
     fi
 done
@@ -542,6 +607,7 @@ case "${boot_fails}" in
 esac
 if [ "${boot_fails}" -ge 3 ]; then
     alog "DISABLED: ${boot_fails} incomplete runs in a row. Delete ${BOOT_COUNT_FILE} to re-enable."
+    set_home_app com.webos.app.home
     exit 0
 fi
 echo $((boot_fails + 1)) > "${BOOT_COUNT_FILE}" 2>/dev/null || true
@@ -954,7 +1020,9 @@ luna_try "dev/listApps" 'luna://com.webos.applicationManager/dev/listApps' '{}'
 sleep 1
 # Pins the tile to the front of the LG Home app row. The key is "position";
 # "index" is rejected as invalid parameters on webOS 25.
-luna_try "moveLaunchPoint" -a com.webos.app.home 'luna://com.webos.applicationManager/moveLaunchPoint' '{"launchPointId":"tld.wolfdenos.home_default","position":0}'
+if [ -d "${WOLF_DIR}" ]; then
+    luna_try "moveLaunchPoint" -a com.webos.app.home 'luna://com.webos.applicationManager/moveLaunchPoint' '{"launchPointId":"tld.wolfdenos.home_default","position":0}'
+fi
 
 # Does SAM know the app at all? This is the question the old code never asked.
 # State a verdict rather than leaving a raw response to be interpreted.
@@ -971,6 +1039,26 @@ luna_try "closeByAppId adoverlayex" 'luna://com.webos.applicationManager/closeBy
 
 # The launcher is NOT launched here any more. The work has moved to the LG Home
 # screen itself; our app stays installed as a tile and opens only when chosen.
+
+# E. The QML home screen. The media is not in the ipk (large, not ours), so
+# dev/install wipes it from the app directory on every deploy and it is put
+# back here. Only an app SAM actually knows gets to be the home app; anything
+# else and LG's Home takes the key.
+if [ -f "${QMLHOME_DIR}/main.qml" ] && luna-send -w 4000 -n 1 \
+        'luna://com.webos.applicationManager/getAppInfo' \
+        '{"id":"tld.wolfdenos.qmlhome"}' 2>&1 | grep -q '"returnValue":true'; then
+    for bg_file in home-bg.mp4 home-bg-still.jpg; do
+        if [ -s "${MOD_DIR}/${bg_file}" ] && [ ! -s "${QMLHOME_DIR}/${bg_file}" ]; then
+            cp "${MOD_DIR}/${bg_file}" "${QMLHOME_DIR}/${bg_file}" 2>/dev/null || true
+        fi
+    done
+    alog "qmlhome assets: $(ls "${QMLHOME_DIR}" 2>/dev/null | tr '\n' ' ')"
+    grant_qmlhome_bus
+    set_home_app tld.wolfdenos.qmlhome
+else
+    alog "qmlhome not installed; LG Home stays the home app"
+    set_home_app com.webos.app.home
+fi
 
 # Reached the end intact, so this boot counts as healthy.
 echo 0 > "${BOOT_COUNT_FILE}" 2>/dev/null || true
@@ -1075,12 +1163,48 @@ install_ipk() {
 }
 
 LAUNCHER_INSTALLED=0
-if install_ipk tld.wolfdenos.home wolfdenos.ipk "${WOLF_DIR}"; then
-    LAUNCHER_INSTALLED=1
-    log "launcher registered with SAM as tld.wolfdenos.home"
+if [ "${WOLFDEN_INSTALL_LAUNCHER}" = "1" ]; then
+    if install_ipk tld.wolfdenos.home wolfdenos.ipk "${WOLF_DIR}"; then
+        LAUNCHER_INSTALLED=1
+        log "launcher registered with SAM as tld.wolfdenos.home"
+    else
+        log "LAUNCHER INSTALL FAILED - the wolf OS tile will not appear"
+    fi
 else
-    log "LAUNCHER INSTALL FAILED - the wolf OS tile will not appear"
+    # Parked, not forgotten. Take it off the TV as well, so the tile cannot be
+    # reached by accident while the Home screen is the thing being changed.
+    luna-send -w 5000 -n 1 'luna://com.webos.applicationManager/closeByAppId' \
+        '{"id":"tld.wolfdenos.home"}' >/dev/null 2>&1 || true
+    luna-send -w 8000 -n 1 'luna://com.webos.appInstallService/dev/remove' \
+        '{"id":"tld.wolfdenos.home","subscribe":false}' >/dev/null 2>&1 || true
+    rm -rf "${WOLF_DIR}" 2>/dev/null || true
+    log "launcher install skipped and the app removed (WOLFDEN_INSTALL_LAUNCHER=0)"
 fi
+
+# The native QML home screen. It replaces LG's Home through the same switch LG
+# uses for its own Senior Home: applicationManager/setDefaultApp for the
+# "home" category, a persisted system setting. apply.sh asserts it on every
+# boot and points it back at LG's Home whenever ours is missing.
+QMLHOME_INSTALLED=0
+if install_ipk tld.wolfdenos.qmlhome wolfdenos-qmlhome.ipk "${QMLHOME_DIR}"; then
+    QMLHOME_INSTALLED=1
+    log "QML home registered with SAM as tld.wolfdenos.qmlhome"
+else
+    log "QML HOME INSTALL FAILED - LG's Home stays the home app"
+fi
+for bg_file in home-bg.mp4 home-bg-still.jpg; do
+    if curl -s -m 240 -o "${MOD_DIR}/${bg_file}" "${WOLFDEN_BASE_URL}${bg_file}" \
+            && [ -s "${MOD_DIR}/${bg_file}" ]; then
+        log "home background ${bg_file} ($(wc -c < "${MOD_DIR}/${bg_file}") bytes)"
+    else
+        rm -f "${MOD_DIR}/${bg_file}" 2>/dev/null || true
+        log "home background ${bg_file} not fetched"
+    fi
+done
+# The throwaway QML test card from the first native experiments.
+luna-send -w 5000 -n 1 'luna://com.webos.appInstallService/dev/remove' \
+    '{"id":"tld.wolfdenos.qmltest","subscribe":false}' >/dev/null 2>&1 || true
+rm -rf /media/developer/apps/usr/palm/applications/tld.wolfdenos.qmltest 2>/dev/null || true
 
 sh "${MOD_DIR}/apply.sh"
 rm -f "${WOLFDEN_DEPLOY_MARKER}" 2>/dev/null || true

@@ -706,7 +706,13 @@ class RequestedFilesTracker:
             return len(self._tracked)
 
 
-DEFAULT_LOG_WAIT = 90
+# How long the laptop keeps serving after the stage is up. This is not just a
+# log window: the TV pulls the launcher ipk, the patched library, the
+# background video and the QML home's media through this same server, and a
+# deploy that ends early strands the TV half-installed with nothing in the
+# output to say so -- the home app simply was not there afterwards. 60 was
+# enough once; the payload has grown.
+DEFAULT_LOG_WAIT = 240
 LOG_PLACEHOLDER = b"__WOLFDEN_LOG_URL__"
 BASE_URL_PLACEHOLDER = b"__WOLFDEN_BASE_URL__"
 LOG_ENDPOINT_PATH = "/log"
@@ -729,8 +735,14 @@ HOME_BANNER_SIZES = (
 # with curl, so counting it as a required file would stall wait_for_all().
 PATCHED_LIBAPP = "libapp.so"
 BACKGROUND_VIDEO = "bg.mp4"
+QMLHOME_IPK = "wolfdenos-qmlhome.ipk"
+# Live background for the QML home app and the still it falls back to when
+# idle. Large and not ours, so served at deploy time rather than packaged.
+HOME_BG_VIDEO = "home-bg.mp4"
+HOME_BG_STILL = "home-bg-still.jpg"
 EXTRA_SERVABLE_FILES = (
-    (LAUNCHER_IPK, HOME_BANNER, PATCHED_LIBAPP, BACKGROUND_VIDEO)
+    (LAUNCHER_IPK, HOME_BANNER, PATCHED_LIBAPP, BACKGROUND_VIDEO,
+     QMLHOME_IPK, HOME_BG_VIDEO, HOME_BG_STILL)
     + HOME_BANNER_SIZES
 )
 

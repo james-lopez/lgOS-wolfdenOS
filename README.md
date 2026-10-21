@@ -551,6 +551,149 @@ boot is all `apply.sh` can do.
 
 ---
 
+## The Native Home Screen (`qmlhome/`)
+
+wolfdenOS is now a native QML app that *is* the TV's home screen. LG's Home is
+untouched and still installed underneath; the TV is simply told to open ours.
+
+### How the OS was repointed
+
+`com.webos.app.home` is `"type": "flutter"` -- there is no binary to swap, a
+system runner (`/usr/bin/flutter-client`) loads its Dart snapshot. And SAM does
+**not** re-read `appinfo.json`: a bind-mounted copy with the title changed to
+`HomeProbe` still came back as `Home`. So editing LG's manifest is a dead end.
+
+What works is the switch LG uses for its own Senior Home. `com.webos.app.home`
+and `com.webos.app.seniorhome` both carry `"appCategory": ["home"]`, and the
+compositor's QML (`StarfishHomeView.qml`) opens the home screen with:
+
+```
+luna://com.webos.applicationManager/launchDefaultApp  {"category":"home"}
+```
+
+The default is settable, and persists as `general.defaultApps.home` in
+settingsservice:
+
+```
+luna://com.webos.applicationManager/setDefaultApp  {"category":"home","appId":"tld.wolfdenos.qmlhome"}
+```
+
+(The schema is in `/etc/palm/schemas/sam/applicationManager.setDefaultApp.schema`;
+`"id"` is rejected, it is `"appId"`.) `apply.sh` asserts this on every boot,
+and every exit path that gives up on the modifications -- the USB kill switch,
+the three-strike counter, `--revert` -- hands HOME back to `com.webos.app.home`
+first. A home app that cannot start would otherwise stay the home app across
+power cycles. The failure mode is shallow regardless: if ours exits, SAM falls
+back to LG's.
+
+### Why QML
+
+`"type": "qml"` is a first-class app type here: Qt 5.12 with QtWayland, LG's
+own `Eos.Window` / `WebOSServices` modules, and a `qml-runner` that handles the
+Wayland shell. A dev-installed QML app runs **as root, unjailed**
+(`/proc/<pid>/root` is `/`), and reaches the screen in ~200ms. The whole
+launch chain was proven with a 25-line test card before this was written.
+
+Rust is viable on this box too -- `armv7-unknown-linux-gnueabi` cross-linked
+with `zig cc -target arm-linux-gnueabi.2.35` ran first try (`glibc 2.35`,
+soft-float, `/lib/ld-linux.so.3`) -- but a Rust *UI* means speaking
+`wl_webos_shell` and EGL yourself. The protocol is two small interfaces
+(public, Apache-2.0, in `webosose/webos-wayland-extensions`), so it is
+tractable, just weeks of plumbing before a tile. QML gives the launcher's data
+layer for free. Rust's place, if it earns one, is a native luna service behind
+the UI.
+
+### Things that cost real time
+
+**The luna role appinstalld writes is wrong for QML apps.** It sets `exeName`
+to the app's `main.qml`. The process on the bus is `/usr/bin/qml-runner`, so
+the hub rejects the registration and every `Service` call in the app is
+silently dead -- the only trace is one line in `/var/log/dbg-log`:
+
+```
+Failed to initialize LunaServiceManager instance for appId: "tld.wolfdenos.qmlhome"
+```
+
+LG's own QML apps are covered by `roles.d/com.webos.app.qmlrunner.role.json`
+plus a `containers.d` entry naming qml-runner as a trusted container. A dev
+app gets neither. `grant_qmlhome_bus` in `apply.sh` writes what Homebrew
+Channel's `elevate-service` writes for its own service, adapted: an
+`appId`-keyed role in `/var/luna-service2-dev/roles.d`, client permissions for
+every ACG group, a manifest, the legacy `/var/palm/ls2-dev/roles` files with
+`exeName` corrected, then `ls-control scan-services`. The name the app
+actually registers is `<appId>-<pid>`, so `allowedNames` must carry
+`"<appId>-*"`. It runs after every install, because `dev/install` rewrites
+appinstalld's files.
+
+**The `Service` element's API is not what it looks like.** Found by printing
+`typeof` on the device, since there is no `.qmltypes` for it:
+
+- The payload is the **argument of the `callSuccess` signal** --
+  `arguments[0]` in the handler, already an object.
+- `response` is a *method*, not a property. `onResponseChanged` is a load-time
+  error that kills the app.
+- There is no `callError` signal. Same failure.
+- One `Service` per method is fine (the double-registration theory was wrong);
+  the app uses one object and switches `method` per call anyway.
+
+**Video is on the hardware plane.** QtMultimedia plays through LG's uMedia
+pipeline onto the video plane, which sits *below* the graphics plane. The
+`Video` item draws nothing; it punches a transparent hole. So the window must
+be transparent and nothing opaque may sit under the `Video`, or the footage is
+covered. The idle still is stacked above it and faded in. The compositor's own
+capture (`captureCompositorOutput`) shows the hole as flat white; the video
+plane is read with `com.webos.service.capture/executeOneShot`.
+
+**Qt is 5.12.** `import QtQuick 2.4` hides `Gradient.orientation` (2.12), and
+inline `component` syntax is 5.15. Import 2.12 and use a separate `Tile.qml`.
+`Keys` cannot attach to `WebOSWindow` (a Window, not an Item).
+
+**Only `console.warn` reaches the log.** `console.log` from QML goes nowhere
+useful; warnings land in `/var/log/dbg-log` tagged `qml-runner [] <appId>`.
+
+**BACK and EXIT do not reach the app by default, and leaving is a trap.**
+The compositor's key filter (`/usr/lib/qml/KeyFilters/systemUi.js`,
+`activeSurfaceAcceptsBackKey`) delivers BACK only if the surface carries the
+window property `_WEBOS_ACCESS_POLICY_KEYS_BACK = "true"`; otherwise it shows
+its own "Do you want to exit the app?" alert and `closeByAppId`s the app. The
+`keyMask` on `WebOSWindow` was not enough on its own. LG's QML apps assign
+`root.windowProperties._WEBOS_ACCESS_POLICY_KEYS_BACK = true` (and `_EXIT`),
+which qml-runner accepts with a deprecation warning; `setWindowProperty()` is
+not invokable from QML. `main.qml` sets both in `Component.onCompleted`.
+
+Why it matters: when the home app closes for any reason, SAM's last-app
+fallback (`LAUNCH_LASTAPP {"app_id":"","reason":"in_mode"}` in `dbg-log`)
+launches **`com.webos.app.home`, hard-coded**, not `defaultApps.home`. Tested:
+close ours → LG Home; close LG Home while it is foreground → LG Home again.
+So the home screen never quits itself: BACK on the dock is a no-op, BACK in
+All Apps closes the grid, and HOME from anywhere goes through
+`launchDefaultApp {"category":"home"}` back to ours.
+
+### The dev loop
+
+```sh
+python3 tools/push_qmlhome.py --capture shot.png
+```
+
+pushes `qmlhome/*.qml` into the app directory over telnet, relaunches the home
+app, and prints qml-runner's warnings. Seconds, against minutes for a deploy.
+
+**Deploys need `--log-wait` of about 240 now** (the default). The TV pulls
+the ipk, the patched library, the background video and the home's media
+through the laptop's server during that window; one deploy with `60` ended
+before the TV reached the QML home's ipk, the app was simply absent
+afterwards, and `apply.sh`'s failsafe quietly handed HOME back to LG. Nothing
+in the laptop's output said why -- the TV's remaining log lines had nowhere to
+go either.
+`appinfo.json` changes still need a deploy (`tools/build_ipk.py qmlhome -o
+wwwroot/wolfdenos-qmlhome.ipk`, then `wolfdenOS.py`).
+
+The live background is `wwwroot/home-bg.mp4` (1080p, no audio) with
+`home-bg-still.jpg` as the idle fallback; both are served at deploy time and
+copied into the app directory by `apply.sh`, since `dev/install` wipes it.
+
+---
+
 ## The Home Banner: What the TV Actually Shows
 
 The seasonal background is set by replacing LG's own `bg_banner_img.png` (and
