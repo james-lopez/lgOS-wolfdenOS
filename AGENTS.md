@@ -27,8 +27,9 @@ tried, what the log said, what actually works). The README stays short.
   stops. A home app that cannot start would otherwise be the home app forever.
 - Do not reintroduce HTML or QML inside heredocs in `debloat_home.sh`.
   `qmlhome/` and `launcher/` are the sources; the ipk builders package them.
-- The TV is on a quarantined VLAN; its address is never written into docs or
-  committed defaults (this repo is public). SSH is closed; the
+- The TV is on a quarantined VLAN; its address lives only in the gitignored
+  `.tv-ip` (or `WOLFDEN_TV`), never in docs or committed defaults: this repo
+  is public. SSH is closed; the
   only shell is Homebrew Channel's telnet (`tools/tv_shell.py`). Do not open
   anything else on it.
 - Git: stage files by name, show the commit message first, no

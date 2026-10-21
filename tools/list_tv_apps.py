@@ -11,6 +11,8 @@ import sys
 ROOT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT_DIR)
 import wolfdenOS as slopbro
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import tv_shell  # noqa: E402
 
 
 REMOVED_APP_IDS = {
@@ -26,7 +28,10 @@ REMOVED_APP_IDS = {
 
 
 def main():
-    ip = sys.argv[1] if len(sys.argv) > 1 else "192.168.97.141"
+    ip = sys.argv[1] if len(sys.argv) > 1 else tv_shell.default_host()
+    if not ip:
+        print("usage: list_tv_apps.py <tv-ip>  (or set WOLFDEN_TV / .tv-ip)", file=sys.stderr)
+        return 1
     print(f"[*] Connecting to wss://{ip}:3001 ...")
     ws = slopbro.WebSocket.connect(ip, slopbro.PORT_TLS, secure=True, timeout=8.0)
     client = slopbro.SSAPClient(ws)

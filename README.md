@@ -50,7 +50,9 @@ To revert all modifications back to factory stock webOS:
 
 ### 1. Target Hardware & Root Persistence
 - **TV Model**: LG `OLED65G3PUA` (`webOS 25` / firmware `10.3.0-2504`, `sdkVersion: 10.3.0`)
-- **LAN Address**: the TV sits on its own quarantined VLAN; pass its address as `<tv-ip>` to every tool (the defaults in `tools/` are set per machine, not committed as yours).
+- **LAN Address**: the TV sits on its own quarantined VLAN. Put its address
+  in a gitignored `.tv-ip` at the repo root (or export `WOLFDEN_TV`); the
+  tools read it as their default, and `wolfdenOS.py` takes it as `<tv-ip>`.
 - **SSAP Client Key**: Saved locally in `<tv-ip>.key` (gitignored) (paired; no TV prompt required on subsequent runs)
 - **Root & Persistence**:
   - Rooted via `com.webos.service.jsserver/run` privilege escalation (`wolfdenOS.py` -> `wwwroot/index.html` -> `wwwroot/autoroot.sh`).

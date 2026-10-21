@@ -85,3 +85,7 @@ wwwroot/home-bg.mp4
 wwwroot/home-bg-still.jpg
 qmlhome/home-bg.mp4
 qmlhome/home-bg-still.jpg
+
+# The TV's address, read by tools/tv_shell.py and everything that imports it.
+# Per machine; the repo is public.
+/.tv-ip

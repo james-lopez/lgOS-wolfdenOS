@@ -40,7 +40,8 @@ NOISE = ("XKB keymap", "window_id assigned", "handleWindowIdAssignment",
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__.strip().splitlines()[0])
-    parser.add_argument("--host", default=tv_shell.DEFAULT_HOST)
+    parser.add_argument("--host", default=tv_shell.DEFAULT_HOST, required=tv_shell.DEFAULT_HOST is None,
+                        help="TV address (default: $WOLFDEN_TV or .tv-ip)")
     parser.add_argument("--capture", help="also pull a graphics-plane capture to this path")
     parser.add_argument("--wait", type=int, default=9, help="seconds to give the app after launch")
     args = parser.parse_args(argv)

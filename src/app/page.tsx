@@ -389,7 +389,7 @@ const INITIAL_SIDEBAR_APPS: SidebarAppItem[] = [
 const INITIAL_CONFIG: G3ModConfig = {
   repoName: "lgOS-wolfdenOS",
   githubOwner: "james-lopez",
-  tvIp: "192.168.97.141",
+  tvIp: "",
   tvModel: "OLED65G3PUA",
   webosVersion: "10.3.0-2504 (webOS 25)",
   localIpOverride: "",
@@ -539,7 +539,7 @@ export default function G3StudioPage() {
   const [saving, setSaving] = useState(false);
   const [running, setRunning] = useState(false);
   const [terminalLog, setTerminalLog] = useState<string>(
-    "[ready] Repo: github.com/james-lopez/lgOS-wolfdenOS\n[ready] Target: LG OLED65G3PUA @ 192.168.97.141 (webOS 25 / 10.3.0-2504)\n[ready] Paradigms: wolfdenOS Purplish Horizontal Glass Dock + wolf OS Core Patcher"
+    "[ready] Repo: github.com/james-lopez/lgOS-wolfdenOS\n[ready] Target: LG OLED65G3PUA (webOS 25 / 10.3.0-2504)\n[ready] Paradigms: wolfdenOS Purplish Horizontal Glass Dock + wolf OS Core Patcher"
   );
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
 
@@ -649,7 +649,7 @@ export default function G3StudioPage() {
             stderr || "(none)"
           }\n--- STDOUT ---\n${
             stdout || "(none)"
-          }\n\nNote: This Cloud VM is not on your home 192.168.97.x Wi-Fi/LAN. Run the exact command shown in Step 2 below on your laptop/Mac/PC on the same Wi-Fi as your OLED65G3PUA!`
+          }\n\nNote: This Cloud VM is not on your home Wi-Fi/LAN. Run the exact command shown in Step 2 below on your laptop/Mac/PC on the same Wi-Fi as your OLED65G3PUA!`
         );
       }
     } catch (e: unknown) {
@@ -1724,10 +1724,10 @@ export default function G3StudioPage() {
               <CardHeader className="pb-3 border-b border-zinc-800/80">
                 <CardTitle className="text-base text-white flex items-center gap-2">
                   <GitBranch className="w-4 h-4 text-emerald-400" />
-                  Step-by-Step Directions: Root & Deploy on Your LG OLED65G3PUA (192.168.97.141)
+                  Step-by-Step Directions: Root & Deploy on Your LG OLED65G3PUA
                 </CardTitle>
                 <CardDescription className="text-xs text-zinc-400">
-                  Run these exact commands from any laptop/computer on your home Wi-Fi (`192.168.97.x`)
+                  Run these exact commands from any laptop/computer on the same Wi-Fi as the TV
                 </CardDescription>
               </CardHeader>
               <CardContent className="p-4 space-y-4">

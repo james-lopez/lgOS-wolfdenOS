@@ -1,7 +1,7 @@
 {
   "repoName": "lgOS-wolfdenOS",
   "githubOwner": "james-lopez",
-  "tvIp": "192.168.97.141",
+  "tvIp": "",
   "tvModel": "OLED65G3PUA",
   "webosVersion": "10.3.0-2504 (webOS 25)",
   "localIpOverride": "",

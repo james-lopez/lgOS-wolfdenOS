@@ -283,7 +283,7 @@ export const DEFAULT_SIDEBAR_APPS: SidebarAppItem[] = [
 export const DEFAULT_G3_CONFIG: G3ModConfig = {
   repoName: "lgOS-wolfdenOS",
   githubOwner: "james-lopez",
-  tvIp: "192.168.97.141",
+  tvIp: "",
   tvModel: "OLED65G3PUA",
   webosVersion: "10.3.0-2504 (webOS 25)",
   localIpOverride: "",
@@ -1607,7 +1607,13 @@ export async function POST(request: Request) {
         args.push("--fake-service-path", config.fakeServicePath);
       }
       args.push("--webos-version", "10");
-      args.push(config.tvIp || "192.168.97.141");
+      if (!config.tvIp || !config.tvIp.trim()) {
+        return NextResponse.json(
+          { error: "Set the TV's address in the config first (tvIp)." },
+          { status: 400 }
+        );
+      }
+      args.push(config.tvIp.trim());
 
       const runResult = await new Promise<{
         exitCode: number;

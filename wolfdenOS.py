@@ -12,8 +12,8 @@ Single file, standard library only. Requires Python 3 and should be run on
 a PC on the same LAN as the TV.
 
 Example:
-    python3 wolfdenOS.py 192.168.97.141
-    python3 wolfdenOS.py --debug --webos-version 10 192.168.97.141
+    python3 wolfdenOS.py <tv-ip>
+    python3 wolfdenOS.py --debug --webos-version 10 <tv-ip>
 """
 
 import argparse

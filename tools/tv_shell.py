@@ -12,11 +12,29 @@ still go through wolfdenOS.py -- this is for reading, surveying and one-off chec
 import argparse
 import base64
 import socket
+import os
 import sys
 import time
 import uuid
 
-DEFAULT_HOST = "192.168.97.141"
+
+
+def default_host():
+    """The TV's address, which is per machine and never committed: the repo is
+    public. WOLFDEN_TV in the environment wins, then the first line of a
+    gitignored .tv-ip at the repo root; with neither, --host is required."""
+    env = os.environ.get("WOLFDEN_TV", "").strip()
+    if env:
+        return env
+    path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), ".tv-ip")
+    try:
+        with open(path) as fh:
+            return fh.readline().strip() or None
+    except OSError:
+        return None
+
+
+DEFAULT_HOST = default_host()
 IAC = 255
 
 # Input lines longer than this come back truncated over the Homebrew telnet tty.
@@ -142,7 +160,8 @@ def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__.strip().splitlines()[0])
     parser.add_argument("command", nargs="?", help="shell command to run")
     parser.add_argument("-f", "--file", help="read the script from a file instead")
-    parser.add_argument("--host", default=DEFAULT_HOST)
+    parser.add_argument("--host", default=DEFAULT_HOST, required=DEFAULT_HOST is None,
+                        help="TV address (default: $WOLFDEN_TV or .tv-ip)")
     parser.add_argument("--port", type=int, default=23)
     parser.add_argument("--timeout", type=float, default=45.0)
     parser.add_argument("--pull", metavar="REMOTE",
