@@ -494,6 +494,50 @@ running list behind ours. That is fine: HOME from LG's Home goes through
 `launchDefaultApp` and lands on ours (verified with the remote), and closing
 LG's Home only makes SAM relaunch it.
 
+**Boot went LG Home → LG Home → ours, and the HOME key was never the
+reason.** On a power-on the TV showed stock LG Home, then the patched LG Home,
+and reached ours only after an app had been opened and HOME pressed. The
+timeline from `/var/log/bootd.log` and the rotated `dbg-log.1.gz`:
+
+- 10s: bootd asks `com.webos.service.systemprofile/getProfiles` for
+  `defaultApps` and logs `Profiles: defaultApps Home(com.webos.app.home)`.
+- 13s: bootd launches that id directly: `launch {"id":"com.webos.app.home",
+  "noSplash":true,"params":{"boot":true}}`. Not `launchDefaultApp`, so
+  settingsservice's `defaultApps.home` (ours) plays no part at boot.
+- 24-37s: `apply.sh` runs from init.d: mounts, debloat, `setDefaultApp` ours.
+  Somewhere in there the foreground went empty and SAM's last-app fallback
+  relaunched LG Home (the "patched" one the user saw second).
+- apply.sh never launched ours; the first HOME press from an app did.
+
+The profile bootd reads is the *generated* `/var/webos-profile/platform/profile.json`
+(`profile_generator`, first boot), and systemprofile merges
+`/var/webos-profile/override/*_profile.json` on top of it -- at boot and on
+`luna://com.webos.service.systemprofile/debug/rescan`. `/var` is persistent
+ext4. So:
+
+```sh
+echo '{"defaultApps":{"categories":{"home":"tld.wolfdenos.qmlhome","aod":"com.webos.app.lifeonscreen"}}}' \
+  > /var/webos-profile/override/wolfden_profile.json
+luna-send -n 1 luna://com.webos.service.systemprofile/debug/rescan '{}'
+```
+
+flips what bootd launches at 13s, and the change is already in the
+generated profile.json afterwards. `set_home_app` in apply.sh writes or
+deletes that file alongside `setDefaultApp`, so every fallback path (kill
+switch, three strikes, `--revert`) also puts LG Home back at boot. apply.sh
+now ends with `launchDefaultApp {"category":"home"}` as well, so a deploy
+lands on ours instead of waiting for a key press. `homeAutoLaunch` is kept
+*on* now (it used to be forced off to stop LG Home auto-opening): it is the
+setting that makes bootd open the home app at all.
+
+Related, found on the way: the same profile carries `idleApp.appId =
+com.webos.app.home`, and SAM's `lastAppHandlerPolicy` is `idleApp`. That is
+the hard-coded fallback seen earlier. It was left pointing at LG Home on
+purpose: if ours ever fails to start, LG Home appearing is the signal, and
+pointing the fallback at a broken app would loop. bootd's "Visible(true)"
+log line is not `appinfo.visible` -- LG Home itself ships
+`"visible": false, "class": {"hidden": true}`, the same as ours.
+
 **The video froze after returning from an app.** `Qt.application.active`
 going false pauses the `Video`; coming back called `touch()`, which sets
 `idleStage = 0` -- but the stage was already 0, so `onIdleStageChanged` never

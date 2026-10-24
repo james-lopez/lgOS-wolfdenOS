@@ -66,6 +66,10 @@ To revert all modifications back to factory stock webOS:
 - `general.defaultApps.home` in settingsservice points at it, asserted by
   `apply.sh` on every boot. HOME from any app, including LG's Home, opens it
   through `launchDefaultApp {"category":"home"}`.
+- The TV boots straight into it: bootd's boot-time home comes from the
+  systemprofile `defaultApps` profile, overridden by a one-line file in
+  `/var/webos-profile/override/` that `apply.sh` writes (and every fallback
+  path deletes). LG's Home is not shown at power-on.
 - Live video background (`home-bg.mp4`, hardware video plane) with an OLED
   idle guard (still after 2 min, black with a drifting dim clock after 5),
   12-hour clock and date top right, a neutral glass dock of four apps plus

@@ -32,6 +32,8 @@ if [ "${1}" = "--revert" ] || [ "${1}" = "--uninstall" ]; then
     pkill -f /tmp/wolfden/probe.js 2>/dev/null || true
     luna-send -w 6000 -n 1 'luna://com.webos.applicationManager/setDefaultApp' \
         '{"category":"home","appId":"com.webos.app.home"}' >/dev/null 2>&1 || true
+    rm -f /var/webos-profile/override/wolfden_profile.json
+    luna-send -w 8000 -n 1 'luna://com.webos.service.systemprofile/debug/rescan' '{}' >/dev/null 2>&1 || true
     luna-send -w 8000 -n 1 'luna://com.webos.appInstallService/dev/remove' \
         '{"id":"tld.wolfdenos.qmlhome","subscribe":false}' >/dev/null 2>&1 || true
     rm -rf /tmp/weboshome-merged /tmp/hosts.slopbro /tmp/wolfden
@@ -565,6 +567,16 @@ ROLE_EOF
 # That cuts both ways: a home app that cannot start would stay the home app
 # across power cycles, which is why every exit path below that gives up on the
 # modifications hands HOME back to LG first.
+#
+# That covers the HOME key. The app the TV opens at power-on is a second,
+# separate answer: bootd launches it by id at ~13s, long before this script
+# runs, from the systemprofile "defaultApps" profile -- which it reads from
+# the generated /var/webos-profile/platform/profile.json, not from
+# settingsservice. systemprofile merges /var/webos-profile/override/*.json on
+# top of that at boot and on debug/rescan, and /var is persistent, so one
+# small override file there is what makes the TV boot straight into ours.
+# Every path that hands HOME back to LG deletes it again.
+BOOT_HOME_OVERRIDE="/var/webos-profile/override/wolfden_profile.json"
 set_home_app() {
     if luna-send -w 6000 -n 1 'luna://com.webos.applicationManager/setDefaultApp' \
             "{\"category\":\"home\",\"appId\":\"${1}\"}" 2>&1 | grep -q '"returnValue":true'; then
@@ -572,6 +584,14 @@ set_home_app() {
     else
         alog "setDefaultApp ${1} FAILED"
     fi
+    if [ "${1}" = "com.webos.app.home" ]; then
+        rm -f "${BOOT_HOME_OVERRIDE}"
+    else
+        printf '{"defaultApps":{"categories":{"home":"%s","aod":"com.webos.app.lifeonscreen"}}}\n' "${1}" \
+            > "${BOOT_HOME_OVERRIDE}" 2>/dev/null || alog "could not write ${BOOT_HOME_OVERRIDE}"
+    fi
+    luna-send -w 8000 -n 1 'luna://com.webos.service.systemprofile/debug/rescan' '{}' >/dev/null 2>&1 || true
+    alog "boot-time home -> $(luna-send -w 4000 -n 1 'luna://com.webos.service.systemprofile/getProfiles' '{"names":["defaultApps"]}' 2>&1 | grep -o '"home":"[^"]*"')"
 }
 
 alog "apply.sh starting (pid $$)"
@@ -989,7 +1009,9 @@ prune_launch_points() {
 prune_launch_points
 
 # C. Enforce Luna privacy & home settings
-luna-send -n 1 'luna://com.webos.settingsservice/setSystemSettings' '{"category":"option","settings":{"livePlus":"off","homePromotion":"off","homeAutoLaunch":"off","personalizedAd":"off"}}' >/dev/null 2>&1 || true
+# homeAutoLaunch stays on: it is what makes bootd open the home app at power-on,
+# and the home app is ours now.
+luna-send -n 1 'luna://com.webos.settingsservice/setSystemSettings' '{"category":"option","settings":{"livePlus":"off","homePromotion":"off","homeAutoLaunch":"on","personalizedAd":"off"}}' >/dev/null 2>&1 || true
 
 # Close any ad/ACR overlay cleanly without crashing an active staging webview into error -102
 for proc in com.webos.app.adoverlay com.webos.app.acroverlay; do
@@ -1054,6 +1076,13 @@ if [ -f "${QMLHOME_DIR}/main.qml" ] && luna-send -w 4000 -n 1 \
     alog "qmlhome assets: $(ls "${QMLHOME_DIR}" 2>/dev/null | tr '\n' ' ')"
     grant_qmlhome_bus
     set_home_app tld.wolfdenos.qmlhome
+    # Bring it to the front now. On a fresh boot bootd already launched it
+    # (see set_home_app); after a deploy, or if anything above disturbed the
+    # foreground, this is what puts it there instead of LG's Home.
+    luna-send -w 8000 -n 1 'luna://com.webos.applicationManager/launchDefaultApp' \
+        '{"category":"home"}' >/dev/null 2>&1 || true
+    sleep 3
+    alog "foreground: $(luna-send -w 4000 -n 1 'luna://com.webos.applicationManager/getForegroundAppInfo' '{}' 2>&1 | grep -o '"appId":"[^"]*"')"
 else
     alog "qmlhome not installed; LG Home stays the home app"
     set_home_app com.webos.app.home
