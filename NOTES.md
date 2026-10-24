@@ -699,11 +699,16 @@ Magic Remote's `/dev/input/event2` (it declares `KEY_ENTER`) and
 true) both produced nothing in the app. Anything that needs a remote key
 -- the hold-OK menu, BACK -- still needs a person with the remote.
 
-**The video fallback is driven by position, not state.** The player reports
-`PlayingState` with a dead pipeline and a black plane behind it, which is
-exactly the case the fallback is for. A 4s pulse compares `position` with
-the previous one; no movement while live and in front means the wall, one
-source reload, and the wall goes the moment position moves again.
+**The video fallback is driven by position, not state -- and the wall is
+the floor.** The player reports `PlayingState` with a dead pipeline and a
+black plane behind it, which is exactly the case the fallback is for. The
+first position-based version compared for *inequality*, so a reload
+(position back to 0) counted as movement and dropped the wall onto a plane
+that was still black: wall, then video, then black -- "three backgrounds".
+Now a 1s pulse calls the video live only when position has *advanced* and
+the state is playing; the wall is shown whenever it is not live (launch,
+return from an app, reload), cross-faded both ways. Measured: live 1.3s
+after launch, the wall covers that, no black at any point.
 
 **Boot went LG Home → LG Home → ours, and the HOME key was never the
 reason.** On a power-on the TV showed stock LG Home, then the patched LG Home,

@@ -281,34 +281,40 @@ WebOSWindow {
         else { bgVideo.pause(); }
     }
 
-    // Sometimes the footage never comes back after another app had the video
-    // plane. The player is no help: it can report PlayingState with a dead
-    // pipeline and a black plane behind it. What is reliable is position: a
-    // pulse every 4s compares it with the last one, and if it has not moved
-    // while we are live and in front, the animated fallback takes over (and
-    // one reload is attempted). The moment it moves again the fallback goes.
-    property bool videoFailed: false
-    property bool videoRetried: false
+    // The wall is the floor, the footage is the ceiling. The video plane is
+    // black whenever the pipeline is not delivering frames -- at launch,
+    // coming back from another app, after a reload -- and the player's state
+    // says nothing useful about that (it reports PlayingState over a black
+    // plane). So "live" means position actually advanced since the last
+    // pulse, and the type wall is shown whenever that is not the case, with a
+    // cross-fade either way. The earlier version compared position for
+    // inequality, so a reload (position back to 0) counted as "moving" and
+    // dropped the wall onto a black plane: three backgrounds in a row.
+    property bool videoLive: false
     property int lastVideoPos: -1
+    property int stalledPulses: 0
+    property bool videoRetried: false
     Timer {
         id: videoPulse
-        interval: 4000; repeat: true
+        interval: 1000; repeat: true
         running: root.idleStage === 0 && Qt.application.active
         onTriggered: {
             var pos = bgVideo.position;
-            var moving = pos !== root.lastVideoPos;
+            var advanced = root.lastVideoPos >= 0 && pos > root.lastVideoPos
+                           && bgVideo.playbackState === MediaPlayer.PlayingState;
             root.lastVideoPos = pos;
-            if (moving) {
-                if (root.videoFailed) { root.dbg("video moving again, fallback off"); }
-                root.videoFailed = false; root.videoRetried = false;
+            if (advanced) {
+                if (!root.videoLive) { root.dbg("video live at " + pos); }
+                root.videoLive = true; root.stalledPulses = 0; root.videoRetried = false;
                 return;
             }
-            if (!root.videoFailed) {
-                root.dbg("video stalled at " + pos + " (state " + bgVideo.playbackState + ", status " + bgVideo.status + "); fallback on");
-            }
-            root.videoFailed = true;
-            if (!root.videoRetried) {
+            root.stalledPulses++;
+            if (root.videoLive) { root.dbg("video stalled at " + pos + " (state " + bgVideo.playbackState + ", status " + bgVideo.status + ")"); }
+            root.videoLive = false;
+            // One reload after a few seconds of nothing, then leave it to the wall.
+            if (root.stalledPulses >= 4 && !root.videoRetried) {
                 root.videoRetried = true;
+                root.dbg("reloading video");
                 var src = bgVideo.source; bgVideo.source = ""; bgVideo.source = src;
                 bgVideo.play();
             }
@@ -385,8 +391,8 @@ WebOSWindow {
         loops: MediaPlayer.Infinite
         muted: true
         fillMode: VideoOutput.PreserveAspectCrop
-        onStatusChanged: { if (status === MediaPlayer.InvalidMedia) { root.videoFailed = true; } }
-        onErrorChanged: { if (error !== MediaPlayer.NoError) { root.videoFailed = true; } }
+        onStatusChanged: { if (status === MediaPlayer.InvalidMedia) { root.videoLive = false; } }
+        onErrorChanged: { if (error !== MediaPlayer.NoError) { root.videoLive = false; } }
     }
 
     // Fallback background: a wall of type-case cells with neon outlines that
@@ -396,7 +402,9 @@ WebOSWindow {
     ShaderEffect {
         id: typeWall
         anchors.fill: parent
-        visible: root.videoFailed && root.idleStage === 0
+        visible: opacity > 0
+        opacity: (!root.videoLive && root.idleStage === 0) ? 1 : 0
+        Behavior on opacity { NumberAnimation { duration: 500 } }
         property real t: 0
         property real aspect: width / height
         NumberAnimation on t { from: 0; to: 3600; duration: 3600000; loops: Animation.Infinite; running: typeWall.visible }
