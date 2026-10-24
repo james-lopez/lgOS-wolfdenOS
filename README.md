@@ -12,6 +12,29 @@ preceded it (`launcher/`) is kept as source but no longer installed.
 
 ---
 
+## Next TV: checklist
+
+Confirmed on one `OLED65G3PUA` at `10.3.0-2504`. For another set, in order:
+
+1. Make the USB kill switch (below, "Safety") before anything else.
+2. Confirm the root method applies: `wolfdenOS.py` is slopbro's jsserver
+   exploit; check the TV's firmware against slopbro's supported list first.
+3. Write the TV's address to a gitignored `.tv-ip` (or `WOLFDEN_TV`).
+4. Pull the TV's own `libapp.so` (`uploads/libapp.so` is this G3's) and
+   regenerate `wwwroot/libapp.so` with `tools/patch_libapp.py`; apply.sh
+   refuses a size mismatch, so a wrong one is skipped, not mounted.
+5. Deploy with the default `--log-wait`, then power-cycle and check
+   `/tmp/wolfdenos_apply.log` over `tools/tv_shell.py`.
+
+Model-specific: the libapp.so patch, the banner strip sizes
+(`tools/build_banner.py`), the default dock ids in `qmlhome/main.qml`, and
+`WOLFDEN_KILL_VOICE` (this G3 has no far-field mic). Generic across webOS
+2x as far as tested: the hosts sinkhole, the connman probe, the mask lists,
+the systemprofile override, the luna role grant, and the QML home itself
+(Qt 5.12, `Eos.Window`).
+
+---
+
 ## Quick Start (Deploy to TV over LAN)
 
 Run from your macOS **Terminal** (which has macOS Local Network permission for your LAN):
@@ -71,38 +94,20 @@ To revert all modifications back to factory stock webOS:
   `/var/webos-profile/override/` that `apply.sh` writes (and every fallback
   path deletes). LG's Home is not shown at power-on.
 - Live video background (`home-bg.mp4`, hardware video plane) with an OLED
-  idle guard (still after 2 min, black with a drifting dim clock after 5),
+  idle guard (still after 15 min, black with a drifting dim clock after 20),
   12-hour clock and date top right, a neutral glass dock of four apps plus
   an All Apps tile, and an All Apps grid. Tiles are the app's own artwork edge
   to edge. Apps come live from SAM's `listLaunchPoints` subscription.
 - BACK closes All Apps and is otherwise a no-op; EXIT is swallowed. The home
   screen never quits itself (NOTES.md, "things that cost real time", says why).
-- **The old web launcher (`tld.wolfdenos.home`, `launcher/`) is not
-  installed.** `WOLFDEN_INSTALL_LAUNCHER=0` in `debloat_home.sh` closes,
-  removes and unpins it on deploy. The source and `tools/dev_launcher.py` are
-  kept for reference; the feature list below is what it had.
-- **Legacy launcher UI & Remote Navigation** (not installed):
-  - Deep purplish-black OLED ambient gradient (`#1e0b36` -> `#0c0414` -> `#05020a`) with frosted glass dock (`backdrop-filter: blur(24px)`).
-  - **15 Real Installed User Apps** on the main dock (with crisp monochrome SVG brand icons + native webOS `file://` icon fallback):
-    1. `youtube.leanback.v4` (`YouTube`)
-    2. `com.disney.disneyplus-prod` (`Disney+`)
-    3. `hulu` (`Hulu`)
-    4. `com.apple.appletv` (`Apple TV`)
-    5. `com.wbd.stream` (`HBO Max`)
-    6. `amazon` (`Prime Video`)
-    7. `com.cbs-all-access.webapp.prod` (`Paramount+`)
-    8. `com.crunchyroll.webapp` (`Crunchyroll`)
-    9. `com.peacock.tv` (`Peacock`)
-    10. `com.microsoft.xbox` (`Xbox`)
-    11. `com.tubitv.ott.tubi` (`Tubi`)
-    12. `com.plutotv.app` (`Pluto TV`)
-    13. `com.movenetworks.app.sling-tv-sling-production` (`Sling TV`)
-    14. `tv.orka.lgtv` (`OrkaTV`)
-    15. `org.webosbrew.hbchannel` (`Homebrew Channel`)
-  - **Top-Right 3 Minimalist Glass Buttons**:
-    1. **Background Theme Cycle**: Cycles between Purplish Nebula, Deep Amethyst, and Pure OLED Black.
-    2. **All Apps Drawer**: Opens a glass modal drawer of all installed apps (`listLaunchPoints` + `tv-launchpoints.json` snapshot) to toggle apps onto or off the main dock.
-    3. **Rearrange & Delete Mode**: Also triggered by holding **OK (`Enter`) for 650ms** on any dock tile (`Left`/`Right` moves the app, `Down` removes it from the dock, `OK`/`Back` saves to `localStorage`).
+- Hold OK on any app in All Apps to add it to the dock (blue halo marks the
+  docked ones), hold OK on a dock tile to remove it; saved in
+  `/home/root/.config/wolfdenos/home.conf`. Up from the grid's first row is
+  "Update <app> in LG Store": the Content Store stays installed as the only
+  update route. If the footage fails to come back, an animated type-wall
+  shader stands in until it does.
+- The retired web launcher (`launcher/`, `tld.wolfdenos.home`) is not
+  installed (`WOLFDEN_INSTALL_LAUNCHER=0`); its source stays for reference.
 
 ### 3. Native LG Home (`com.webos.app.home`) Core Modifications (`wolf OS`)
 - **Non-Destructive RAM Bind-Mount Overlay**:

@@ -566,6 +566,86 @@ the `mount | grep -q " ${dir} "` guards in apply.sh do work.
 min to black; by request it is now 15 and 20. LG's own screen saver timer
 (`option.screenSaverTimer`, "3") is separate and was not touched.
 
+## Dock editing, app updates and the video fallback (Day 5, later)
+
+**Dock editing is hold-OK.** In All Apps every installed app is listed;
+holding OK (600 ms, auto-repeats ignored, release before the timer is a tap)
+adds it to or removes it from the dock, and holding OK on a dock tile removes
+it. Docked apps carry a blue halo (`Rectangle` + `Glow` from
+QtGraphicalEffects) around the artwork. The list is kept with
+`Qt.labs.settings` -- which only initialises with an explicit `fileName`
+here, since qml-runner sets no `organizationName` ("Failed to initialize
+QSettings instance. Status code is: 1") -- at
+`/home/root/.config/wolfdenos/home.conf`, persistent and outside the app
+directory that `dev/install` wipes. Dock cap is 8.
+
+**App updates go through LG's Content Store, which is a 6 KB loader.**
+`com.webos.app.discovery` ("Apps") is `index.html` + `app.js`: it asks
+`com.webos.service.sdx/getHttpHeaderForServiceRequest` for the device
+headers, then POSTs a form to
+`https://<region>.app.lgwebostv.com/discovery_2024/discovery.html?page=store`.
+The real store is that hosted page (`app.<hash>.js`, 275 KB), fetched live;
+the only launch parameter the loader itself understands is
+`{"query":"featured"}`, and the hosted entry bundle (which pulls further
+chunks at runtime) shows no `launchParams` or `PalmSystem` handling, so no
+per-app deep link was found. The home
+screen's "Update <app> in LG Store" button (Up from the grid's first row)
+therefore opens the store, where the app's page and its update button are a
+few presses away. For this the store was taken out of `mask_bloat_apps`,
+`prune_launch_points` and the deploy-time hide list; SAM only picks a
+system app back up at boot, so a power cycle follows the change. The hosts
+it needs (`*.lgtvsdp.com`, `*.app.lgwebostv.com`) are reachable; the OTA
+hosts stay sinkholed, so app updates do not reopen OS updates.
+
+**When the footage does not come back, a shader does.** Returning from
+another app sometimes leaves the player in a non-playing state with no
+error, and the still only covers idle. A watchdog (`videoWatch`, 6 s after
+any `play()`) now flips `videoFailed`, retries the source once, and a
+fullscreen `ShaderEffect` takes over: a wall of type-case cells with neon
+outlines that drift and change colour, one cheap fragment shader (hash per
+cell, three glyph shapes, a sine "wave" picking which cells are lit, a
+palette from `cos`). It sits *above* the `Video` (anything under it covers
+the footage) and is only composited while visible; it steps aside the
+moment `playbackState` becomes `PlayingState`. Verified by hiding
+`home-bg.mp4` and relaunching: uMediaClient logs "202 Media Not Found", the
+wall appears, the dock stays usable.
+
+**The boot animation cannot be ours; what follows it can.** There are two
+LG splashes at power-on. The still LG logo is the bootloader's. The animated
+"swatch" (the sprite in `/usr/lib/qml/BootLogo/`, `230315_360x115_sprite.png`
+/ `720x230(4K)_sprite.png`, 88 frames) is `BootLogo.qml`, loaded *inside the
+compositor* when bootd calls `systemUIManager/launch
+{"appId":"com.webos.app.bootlogo","params":{"type":"swatch"}}` at ~10s, and
+closed 1.2s after the first app launches (~14s). Our boot hook runs at ~20s,
+so no bind mount can reach it, and `/usr/lib/qml` is the read-only overlay
+whose lower layer is `/dev/mmcblk0p28` (squashfs, `/overlay/bsppart`), i.e.
+firmware. `BootLogo.qml` does have a customization path -- the `customization`
+systemprofile with `supportBootLogo: true` makes it load
+`/mnt/platform-plugins/conf/weboshub_style.json` and show `powerOnOff.logoUrl`
+as a still image ("powered by webOS TV" brand underneath) -- but
+`/mnt/platform-plugins` is an empty directory on the same read-only overlay,
+and it is read at the same ~10s. So: not replaceable without reflashing.
+
+What is ours is everything from ~14s on. The home app now plays a short
+intro on process start (the type-wall shader plus a glowing "wolfdenOS"
+wordmark, 2.6s then a 0.9s cross-fade into the live video). A process start
+is what boot is; HOME-key relaunches reuse the running process
+(qml-runner receives `relaunchRequest`, the launch params arrive as the JSON
+argv of `/usr/bin/qml-runner`, `{"appId":...,"main":...,"params":{}}`), so
+the intro does not replay on every HOME press. One thing learned on the way:
+the wall's `visible` had been tied to the 2.6s flag rather than the fade, so
+the first capture showed the wordmark over the bare video hole. The intro was
+then removed on request -- two splashes in a row is one too many.
+
+**Reflashing, for the record.** The firmware partitions are plain squashfs
+(`/dev/mmcblk0p27` root, 2.1 GB; `/dev/mmcblk0p28` the BSP overlay, 60 MB),
+there is no dm-verity (no `dm-*` devices, nothing in the cmdline), and the
+block devices are writable as root. So replacing the boot sprite by
+rebuilding p28 is mechanically possible. It was not done: whether the
+bootloader (`sbkey=`, `portProtection`) checks those partitions is unknown,
+a failed boot means no telnet and no kill switch, and there is no user
+recovery mode. Not worth four seconds of logo.
+
 **Boot went LG Home → LG Home → ours, and the HOME key was never the
 reason.** On a power-on the TV showed stock LG Home, then the patched LG Home,
 and reached ours only after an app had been opened and HOME pressed. The

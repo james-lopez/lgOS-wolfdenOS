@@ -953,7 +953,9 @@ fi
 mask_bloat_apps() {
     mkdir -p /tmp/wolfden/empty 2>/dev/null || true
     masked=0
-    for bloat in com.webos.app.discovery com.webos.app.browser \
+    # com.webos.app.discovery (the Content Store, tile "Apps") is deliberately
+    # not here: it is the only route to app updates. It sits in All Apps.
+    for bloat in com.webos.app.browser \
                  com.webos.app.lgchannels com.webos.app.videoads \
                  com.webos.app.cmp-client \
                  com.webos.app.fooddelivery com.webos.app.fooddeliveryex \
@@ -1004,7 +1006,7 @@ mask_bloat_apps
 # it accepts all of them.
 prune_launch_points() {
     hidden=0
-    for bloat in com.webos.app.discovery com.webos.app.browser \
+    for bloat in com.webos.app.browser \
                  com.webos.app.lgchannels com.webos.app.videoads \
                  com.webos.app.lifeonscreen com.webos.app.homeconnect \
                  com.webos.app.mediadiscovery com.webos.app.sportsteamsettings \
@@ -1168,7 +1170,7 @@ chmod +x "${MOD_DIR}/apply.sh"
 ln -sf "${MOD_DIR}/apply.sh" "${INITD_LINK}"
 
 # 4. Remove & hide selected promotional / system bloatware apps
-for bloat_id in com.webos.app.discovery amazon.alexa.view com.webos.app.sportsteamsettings com.webos.app.homeconnect com.webos.app.lifeonscreen com.webos.app.browser com.webos.app.mediadiscovery com.webos.app.camera com.webos.app.multiviewsettings com.lgshop.app com.webos.app.lgchannels love.fubo com.rakuten.tv com.webos.app.sportsalert; do
+for bloat_id in amazon.alexa.view com.webos.app.sportsteamsettings com.webos.app.homeconnect com.webos.app.lifeonscreen com.webos.app.browser com.webos.app.mediadiscovery com.webos.app.camera com.webos.app.multiviewsettings com.lgshop.app com.webos.app.lgchannels love.fubo com.rakuten.tv com.webos.app.sportsalert; do
     luna-send -n 1 'luna://com.webos.appInstallService/dev/remove' "{\"id\":\"${bloat_id}\",\"subscribe\":false}" >/dev/null 2>&1 || true
     luna-send -n 1 -a com.webos.app.home 'luna://com.webos.applicationManager/removeLaunchPoint' "{\"launchPointId\":\"${bloat_id}_default\"}" >/dev/null 2>&1 || true
 done
