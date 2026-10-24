@@ -25,9 +25,9 @@ import WebOSServices 1.0
 // transparent and nothing opaque may sit under the Video, or the footage is
 // simply covered. The idle still is stacked ABOVE it and faded in instead.
 //
-// Burn-in guard: the video stops two minutes after the last key press and the
-// still takes over; five minutes in, the screen goes black with a dim clock
-// that drifts. Any key brings it all back. Pure black is pixels off on an
+// Burn-in guard: the video stops fifteen minutes after the last key press and
+// the still takes over; twenty minutes in, the screen goes black with a dim
+// clock that drifts. Any key brings it all back. Pure black is pixels off on an
 // OLED, which is the point.
 
 WebOSWindow {
@@ -67,8 +67,8 @@ WebOSWindow {
         "tld.wolfdenos.overlay", "tld.slopbro.g3mod"
     ]
 
-    readonly property int idlePauseMs: 2 * 60 * 1000
-    readonly property int idleBlackMs: 5 * 60 * 1000
+    readonly property int idlePauseMs: 15 * 60 * 1000
+    readonly property int idleBlackMs: 20 * 60 * 1000
     readonly property int idleDriftMs: 30 * 1000
 
     readonly property string appDir: "/media/developer/apps/usr/palm/applications/tld.wolfdenos.qmlhome/"

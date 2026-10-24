@@ -494,6 +494,78 @@ running list behind ours. That is fine: HOME from LG's Home goes through
 `launchDefaultApp` and lands on ours (verified with the remote), and closing
 LG's Home only makes SAM relaunch it.
 
+## What actually watches, listens and reports (Day 5)
+
+Surveyed over telnet with root, after the question "does this TV listen and
+take screenshots". What the device has, what was running, and what was done.
+
+**Microphone.** `voiceinput_sound` (pid of `com.webos.service.voiceinput.sound`)
+holds two ALSA capture devices open permanently, `pcmC1D0c` and `pcmC1D1c` on
+the `LGSIC` card. But `tv.model.supportFarFieldVoice` is `off` on the G3:
+there is no built-in far-field microphone, and those captures are the Magic
+Remote's mic path (`voiceinput_hidraw` is the other half), which only carries
+audio while the remote's mic button is held. The `voiceLongDistance` setting
+("hands-free voice") was `on` with no hardware behind it; apply.sh sets it
+off. The whole voice stack (`voiceinput`, `voiceconductor`, `nlpmanager`,
+`performer`) is stubbed as well (`WOLFDEN_KILL_VOICE=1` in apply.sh, the default now),
+at the cost of voice search from the remote. `performer` is
+the "who is that" celebrity lookup (`wau.lgtvcommon.com/wau/v1.0/whoau/...`),
+now sinkholed.
+
+**Screenshots / ACR.** `/usr/sbin/acr2` is the Automatic Content Recognition
+daemon: its symbols are `VideoCapture`, `CaptureClient`, `AlsaAudioWrapper`,
+`ImageConverter` and `DaiFastCapture` (dynamic ad insertion). It is a
+*dynamic* luna service (`/usr/palm/services/com.webos.service.acr`): the hub
+spawns it whenever anything calls `com.webos.service.acr`, it idles out, and
+it comes back on the next call -- it was alive (pid 8816) with `livePlus`
+already `off`. The ACR apps (`acroverlay`, `acrcomponent`, `acrhdmi1-4`) and
+the ad-insertion apps (`adhdmi1-4`) are now masked like the other bloat;
+`adoverlay`/`adoverlayex` stay unmasked because deploys stage through them.
+
+**Ads.** `admanager` ("Advertisement Service Manager", also dynamic) polled
+`getForegroundApps` every 60 seconds all day. Its servers were already
+sinkholed; the polling was not.
+
+**Telemetry.** `rdxd` (remote diagnostics: crash and debug reports) and
+`uploadd` (ships those and "analytic" reports to LG's SDP once "EULA accepted"
+and "authenticated with SDP/SDX") are both enabled systemd units, and
+`uploadd` additionally runs as the dynamic service `com.palm.uploadd`, so
+stopping the unit alone leaves a second copy alive. `contentminer` is local
+content indexing for search (it wakes installed services to mine them) and
+was left alone; `eplmanager` is OLED pixel care, also left alone. `crashd`
+and `faultmanager` write locally to `/var/spool/faultmanager`; with uploadd
+gone nothing ships them.
+
+**The fix is a no-op bind-mounted over the binary.** `/usr` is a read-only
+overlay and `systemctl mask` cannot persist, but a bind mount of a two-line
+`exit 0` script over `/usr/sbin/acr2`, `admanager`, `rdxd` and `uploadd`
+means every respawn -- by the hub, by systemd, by anyone -- starts nothing.
+Then the units are stopped and the live processes killed (`pkill -x`, since
+`pkill -f /usr/sbin/uploadd` would also match the stub). Verified after a
+run: none of the four has a pid, and a deliberate call to
+`com.webos.service.acr` no longer brings `acr2` back. `--revert` unmounts
+the stubs.
+
+**Network, measured from the TV.** `curl` from the device reaches
+`www.google.com` and `us.lgtvsdp.com` (LG's SDP: Content Store, app
+resources, app updates) with 200s -- the router VPN is not blocking them --
+while `rdx2.lgtvsdp.com`, `ngfts.lge.com` and the `su`/`snu` OTA hosts fail
+because `/etc/hosts` sinkholes them. So app updates can work and OS updates
+cannot, which is the split wanted: `su.lge.com`/`snu.lge.com`/`su-ssl.lge.com`
+are the software-update hosts and stay blocked; `*.lgtvsdp.com` carries the
+store and must stay open for app updates. The live TCP connections during the
+survey were all Google (YouTube is `keepAlive` and sits in the running list).
+
+**"Stacked" bind mounts are not stacked.** `mount` listed `libapp.so` four
+times and each masked app seven times. They are the same mount propagated
+into the per-service jails under `/var/palm/jail/<service>/usr/palm/...`
+(`/mnt/lg/user`, `/mnt/lg/flash/data`, `/mnt/lg/cmn_data`), not repeats, and
+the `mount | grep -q " ${dir} "` guards in apply.sh do work.
+
+**Idle timers.** The home screen's burn-in guard was 2 min to still and 5
+min to black; by request it is now 15 and 20. LG's own screen saver timer
+(`option.screenSaverTimer`, "3") is separate and was not touched.
+
 **Boot went LG Home → LG Home → ours, and the HOME key was never the
 reason.** On a power-on the TV showed stock LG Home, then the patched LG Home,
 and reached ours only after an app had been opened and HOME pressed. The

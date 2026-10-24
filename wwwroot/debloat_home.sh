@@ -24,6 +24,10 @@ if [ "${1}" = "--revert" ] || [ "${1}" = "--uninstall" ]; then
     umount /etc/hosts 2>/dev/null || true
     umount /usr/palm/applications/com.webos.app.home/lib/libapp.so 2>/dev/null || true
     umount /etc/connman/main.conf 2>/dev/null || true
+    for stubbed in /usr/sbin/acr2 /usr/sbin/admanager /usr/sbin/rdxd /usr/sbin/uploadd \
+                   /usr/sbin/voiceinput /usr/sbin/voiceconductor /usr/sbin/nlpmanager /usr/sbin/performer; do
+        umount "${stubbed}" 2>/dev/null || true
+    done
     for masked_app in /usr/palm/applications/* \
                       /mnt/otncabi/usr/palm/applications/* \
                       /media/system/apps/usr/palm/applications/*; do
@@ -447,6 +451,7 @@ cat > "${MOD_DIR}/hosts.block" << 'EOF'
 0.0.0.0 snu.lge.com
 0.0.0.0 su.lge.com
 0.0.0.0 su-ssl.lge.com
+0.0.0.0 wau.lgtvcommon.com
 #
 # IPv6 twins. The TV holds a global v6 address and asks for AAAA records, so an
 # A-only sinkhole leaves every one of these reachable over v6.
@@ -473,6 +478,7 @@ cat > "${MOD_DIR}/hosts.block" << 'EOF'
 :: snu.lge.com
 :: su.lge.com
 :: su-ssl.lge.com
+:: wau.lgtvcommon.com
 EOF
 
 # 3. Write persistent boot script (${MOD_DIR}/apply.sh)
@@ -484,6 +490,9 @@ QMLHOME_DIR="/media/developer/apps/usr/palm/applications/tld.wolfdenos.qmlhome"
 FLUTTER_ASSETS="/usr/palm/applications/com.webos.app.home/data/flutter_assets/assets"
 HOME_RESOURCES="/usr/palm/applications/com.webos.app.home/resources"
 APPLY_LOG="/tmp/wolfdenos_apply.log"
+# Set to 1 to stub the voice stack as well (see D2 below). This runs from
+# init.d at boot, so it has to be set here, not in the environment.
+WOLFDEN_KILL_VOICE=1
 
 # Baked in when the laptop served debloat_home.sh. Unreachable at boot, by design.
 WOLFDEN_LOG_URL="__WOLFDEN_LOG_URL__"
@@ -790,7 +799,9 @@ if [ -d "${FLUTTER_ASSETS}" ]; then
             stock_sz=$(wc -c < "${stock_lib}" 2>/dev/null | tr -d ' ')
             ours_sz=$(wc -c < "${MOD_DIR}/libapp.so" 2>/dev/null | tr -d ' ')
             if [ "${stock_sz}" = "${ours_sz}" ]; then
-                if mount_err="$(mount --bind "${MOD_DIR}/libapp.so" "${stock_lib}" 2>&1)"; then
+                if mount | grep -q " ${stock_lib} "; then
+                    alog "libapp.so already mounted"
+                elif mount_err="$(mount --bind "${MOD_DIR}/libapp.so" "${stock_lib}" 2>&1)"; then
                     alog "patched libapp.so mounted (${ours_sz} bytes)"
                 else
                     alog "libapp.so bind-mount failed (${mount_err:-<no message>}); stock library left in place"
@@ -952,7 +963,12 @@ mask_bloat_apps() {
                  com.webos.app.premium com.webos.app.store-demo \
                  com.webos.app.sync-demo com.webos.app.multiviewsettings \
                  com.webos.app.camera com.lge.app.viewster \
-                 amazon.alexa.view amazon.alexapr yandex.alice; do
+                 amazon.alexa.view amazon.alexapr yandex.alice \
+                 com.webos.app.acroverlay com.webos.app.acrcomponent \
+                 com.webos.app.acrhdmi1 com.webos.app.acrhdmi2 \
+                 com.webos.app.acrhdmi3 com.webos.app.acrhdmi4 \
+                 com.webos.app.adhdmi1 com.webos.app.adhdmi2 \
+                 com.webos.app.adhdmi3 com.webos.app.adhdmi4; do
         # Not every app lives under /usr/palm/applications. The content store
         # and the browser are on /mnt/otncabi and LG Channels is under
         # /media/system/apps, which is why removeLaunchPoint was the only
@@ -1018,7 +1034,59 @@ for proc in com.webos.app.adoverlay com.webos.app.acroverlay; do
     luna-send -n 1 'luna://com.webos.applicationManager/closeByAppId' "{\"id\":\"${proc}\"}" >/dev/null 2>&1 || true
 done
 
-pkill -f rdxd 2>/dev/null || true
+# D2. The daemons that watch, listen and report. Surveyed over telnet on the
+# device (see NOTES.md, "What actually watches, listens and reports"):
+#
+#   acr2       Automatic Content Recognition: a capture pipeline (VideoCapture,
+#              AlsaAudioWrapper, "DaiFastCapture" = dynamic ad insertion). It
+#              is a dynamic luna service, spawned by the hub whenever anything
+#              calls com.webos.service.acr, and it was alive with livePlus off.
+#   admanager  Advertisement Service Manager; polled getForegroundApps every
+#              60 seconds. Its servers are sinkholed, the polling is not.
+#   rdxd       Remote diagnostics: packages crash and debug reports.
+#   uploadd    Ships those reports (and "analytic" ones) to LG's SDP servers.
+#
+# They are not deleted (read-only overlay) and systemd cannot be told to mask
+# them persistently either; instead a no-op is bind-mounted over each binary,
+# so a respawn, by the hub or by systemd, starts nothing. Done before the
+# units are stopped so nothing comes back in between.
+#
+# The voice stack (voiceinput, voiceconductor, nlpmanager, performer) is
+# stubbed too (WOLFDEN_KILL_VOICE=1 above). This G3 has no far-field microphone
+# (tv.model.supportFarFieldVoice is off); voiceinput_sound holds the Magic
+# Remote's mic path open, which only carries audio while the remote's mic
+# button is held, and voice search from the remote is the only thing lost.
+# Set WOLFDEN_KILL_VOICE=0 to keep it.
+mkdir -p /tmp/wolfden 2>/dev/null || true
+printf '#!/bin/sh\nexit 0\n' > /tmp/wolfden/noop && chmod 755 /tmp/wolfden/noop
+stub_binary() {
+    [ -f "${1}" ] || return 0
+    mount | grep -q " ${1} " && return 0
+    mount --bind /tmp/wolfden/noop "${1}" 2>/dev/null && alog "stubbed ${1}"
+}
+for watcher in /usr/sbin/acr2 /usr/sbin/admanager /usr/sbin/rdxd /usr/sbin/uploadd; do
+    stub_binary "${watcher}"
+done
+systemctl stop rdxd uploadd 2>/dev/null || true
+# uploadd also runs as a dynamic luna service (com.palm.uploadd), spawned by
+# the hub independently of the unit, so the unit stopping is not enough.
+pkill -x uploadd 2>/dev/null || true
+pkill -x rdxd 2>/dev/null || true
+pkill -f /usr/sbin/acr2 2>/dev/null || true
+pkill -f /usr/sbin/admanager 2>/dev/null || true
+if [ "${WOLFDEN_KILL_VOICE}" = "1" ]; then
+    for listener in /usr/sbin/voiceinput /usr/sbin/voiceconductor /usr/sbin/nlpmanager /usr/sbin/performer; do
+        stub_binary "${listener}"
+    done
+    systemctl stop voiceinput voiceconductor 2>/dev/null || true
+    pkill -f voiceinput_ 2>/dev/null || true
+    pkill -f /usr/sbin/nlpmanager 2>/dev/null || true
+    pkill -f /usr/sbin/performer 2>/dev/null || true
+    alog "voice stack stubbed (WOLFDEN_KILL_VOICE=1)"
+fi
+# Hands-free "long distance" voice: no hardware for it here, so off regardless.
+luna-send -n 1 'luna://com.webos.settingsservice/setSystemSettings' '{"category":"general","settings":{"voiceLongDistance":"off"}}' >/dev/null 2>&1 || true
+alog "watchers alive: $(for b in acr2 admanager rdxd uploadd; do pidof $b >/dev/null && printf '%s ' $b; done)"
 
 # Ensure Homebrew Channel SSH & Telnet are enabled and running
 mkdir -p /var/luna/preferences

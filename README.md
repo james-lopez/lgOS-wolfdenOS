@@ -122,6 +122,12 @@ To revert all modifications back to factory stock webOS:
   - Bind-mounts `/tmp/hosts.slopbro` over `/etc/hosts`, blocking the LG ad,
     SmartClip, Yume, LivePlus ACR, `rdx2` and OTA update domains over both
     IPv4 and IPv6.
+- **Watchers stubbed**: the ACR daemon (`acr2`, screen/audio capture), the
+  ad manager, and the crash/analytics uploaders (`rdxd`, `uploadd`) have a
+  no-op bind-mounted over their binaries every boot, so they cannot be
+  respawned; the ACR and ad-insertion apps are masked. The voice stack is
+  stubbed too (`WOLFDEN_KILL_VOICE=1`; this G3 has no far-field mic, so
+  only voice search from the remote is lost). See NOTES.md, Day 5.
 - **Connectivity check answered locally**:
   - LG's probe host no longer exists, so the TV reported itself offline and the
     Home screen drew the no-network banner over everything. A local responder
