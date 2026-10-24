@@ -568,10 +568,14 @@ min to black; by request it is now 15 and 20. LG's own screen saver timer
 
 ## Dock editing, app updates and the video fallback (Day 5, later)
 
-**Dock editing is hold-OK.** In All Apps every installed app is listed;
-holding OK (600 ms, auto-repeats ignored, release before the timer is a tap)
-adds it to or removes it from the dock, and holding OK on a dock tile removes
-it. Docked apps carry a blue halo (`Rectangle` + `Glow` from
+**Dock editing is the 0 key.** In All Apps every installed app is listed;
+pressing 0 opens a two-item menu for the focused app -- "Check for Update"
+and "Add to Dock" / "Remove from Dock" -- and the same menu opens from a
+dock tile. A hold-on-OK version came first (600 ms timer, auto-repeats
+ignored, release before the timer is a tap); on the Magic Remote the hold
+never registered as different from a tap, so a dedicated key won. The
+dock moved to a vertical column on the left edge at the same time (124 px
+tiles, six apps max, name beside the focused tile). Docked apps carry a blue halo (`Rectangle` + `Glow` from
 QtGraphicalEffects) around the artwork. The list is kept with
 `Qt.labs.settings` -- which only initialises with an explicit `fileName`
 here, since qml-runner sets no `organizationName` ("Failed to initialize
@@ -588,10 +592,12 @@ The real store is that hosted page (`app.<hash>.js`, 275 KB), fetched live;
 the only launch parameter the loader itself understands is
 `{"query":"featured"}`, and the hosted entry bundle (which pulls further
 chunks at runtime) shows no `launchParams` or `PalmSystem` handling, so no
-per-app deep link was found. The home
-screen's "Update <app> in LG Store" button (Up from the grid's first row)
-therefore opens the store, where the app's page and its update button are a
-few presses away. For this the store was taken out of `mask_bloat_apps`,
+per-app deep link was found. The "Check
+for Update" entry in the hold-OK app menu therefore opens the store, where
+the app's page and its update button are a few presses away. (A first cut
+put an update button in the All Apps header, reached with Up from the top
+row; Up from the bottom row also changed the selection it named, so it
+became a menu.) For this the store was taken out of `mask_bloat_apps`,
 `prune_launch_points` and the deploy-time hide list; SAM only picks a
 system app back up at boot, so a power cycle follows the change. The hosts
 it needs (`*.lgtvsdp.com`, `*.app.lgwebostv.com`) are reachable; the OTA
@@ -645,6 +651,59 @@ rebuilding p28 is mechanically possible. It was not done: whether the
 bootloader (`sbkey=`, `portProtection`) checks those partitions is unknown,
 a failed boot means no telnet and no kill switch, and there is no user
 recovery mode. Not worth four seconds of logo.
+
+**"Do you want to exit the app?" → Exit used to land on LG's Home.** That
+button is `closeByAppId` on the foreground app; the foreground empties and
+SAM's last-app handler (policy `idleApp`) launches the systemprofile
+`idleApp.appId`, which was `com.webos.app.home`. The same override file
+that sets the boot-time home now sets `idleApp` to ours as well; systemprofile
+is re-read on `debug/rescan` and SAM picked it up live -- launch YouTube,
+`closeByAppId` it, foreground is ours, `LAUNCH_LASTAPP` names
+`tld.wolfdenos.qmlhome`. The caveat stands: if ours fails to start this
+loops until SAM gives up (`count_to_launch_last_app`), and the USB kill
+switch is the way out.
+
+**LG's Home is stock again.** With ours as home app, boot app and idle app
+there is no screen left for the banner art, the "wolf OS" strings, the
+blanked buttons or the patched `libapp.so` to appear on, so block B of
+apply.sh is behind `WOLFDEN_PATCH_LG_HOME` (default 0): it drops any patch
+mounts a previous run left and restarts LG's Home in the background. The
+deploy still stages the patched library and banners; nothing mounts them.
+
+**One `Service`, one live call.** A second `callService()` on the same
+`Service` element silently ends the first subscription: subscribing to
+`homelaunchpoints/listLaunchPoints` after SAM's `listLaunchPoints` left
+SAM's mute. And SAM's list is the wrong one anyway -- it includes every
+launch point `hideLaunchPoint` hides. The grid now subscribes to
+`homelaunchpoints/listLaunchPoints` (the post-hide list LG's Home shows,
+full icon fields), after one plain `listAvailableLaunchPoints` call, which
+oddly answers with the *hidden* ones, so Homebrew Channel (hidden by LG)
+can be kept. Since launching an app is a call on the same object, the
+subscription is renewed every time the home comes back to the front.
+
+**`console.warn` gets throttled, so there is a trace channel now.** pmlog
+blocks a module after a burst (`NL_LOG_BLOCKED {"module_name":"qml-runner"}`
+in `dbg-log`), and the uMediaClient chatter at every play/pause is enough
+to spend the quota, after which the app's own warnings vanish without a
+trace -- including load errors. `main.qml` has `dbg(msg)`: it warns, and if
+`debug.url` sits next to `main.qml` it also POSTs the line there.
+`push_qmlhome.py --trace 20` writes that file, relaunches, and prints the
+POSTs for 20 seconds (`[tv] ...`); a plain push removes the file. This is
+how an empty dock was traced to a `Component.onCompleted` block lost in an
+earlier edit (no `loadDock()`, no window properties, no subscription), which
+a `rebuild:` line made obvious in seconds.
+
+**Keys cannot be injected from the shell.** Writing `input_event`s to the
+Magic Remote's `/dev/input/event2` (it declares `KEY_ENTER`) and
+`com.webos.service.networkinput/sendSpecialKey {"key":"ENTER"}` (returns
+true) both produced nothing in the app. Anything that needs a remote key
+-- the hold-OK menu, BACK -- still needs a person with the remote.
+
+**The video fallback is driven by position, not state.** The player reports
+`PlayingState` with a dead pipeline and a black plane behind it, which is
+exactly the case the fallback is for. A 4s pulse compares `position` with
+the previous one; no movement while live and in front means the wall, one
+source reload, and the wall goes the moment position moves again.
 
 **Boot went LG Home → LG Home → ours, and the HOME key was never the
 reason.** On a power-on the TV showed stock LG Home, then the patched LG Home,

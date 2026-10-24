@@ -493,6 +493,13 @@ APPLY_LOG="/tmp/wolfdenos_apply.log"
 # Set to 1 to stub the voice stack as well (see D2 below). This runs from
 # init.d at boot, so it has to be set here, not in the environment.
 WOLFDEN_KILL_VOICE=1
+# LG's Home is no longer the screen anyone sees (ours is the home app and the
+# boot app), so its cosmetic patches -- the seasonal banner, the "wolf OS"
+# strings, the blanked "Network Settings" and "Go to Apps", the stripped
+# home.xml, the patched libapp.so -- are off and LG's Home is left stock.
+# Set to 1 to bring them back. The debloat, the sinkhole and the watcher
+# stubs are unaffected by this flag.
+WOLFDEN_PATCH_LG_HOME=0
 
 # Baked in when the laptop served debloat_home.sh. Unreachable at boot, by design.
 WOLFDEN_LOG_URL="__WOLFDEN_LOG_URL__"
@@ -596,7 +603,13 @@ set_home_app() {
     if [ "${1}" = "com.webos.app.home" ]; then
         rm -f "${BOOT_HOME_OVERRIDE}"
     else
-        printf '{"defaultApps":{"categories":{"home":"%s","aod":"com.webos.app.lifeonscreen"}}}\n' "${1}" \
+        # idleApp is the app SAM's last-app fallback launches when the
+        # foreground empties -- what the Exit button on "Do you want to exit
+        # the app?" leads to (lastAppHandlerPolicy is "idleApp"). Pointing it
+        # at ours too keeps LG's Home out of that path; verified live, no
+        # reboot needed. If ours ever fails to start this loops until SAM
+        # gives up, which is what the USB kill switch is for.
+        printf '{"defaultApps":{"categories":{"home":"%s","aod":"com.webos.app.lifeonscreen"}},"idleApp":{"support":true,"appId":"%s"}}\n' "${1}" "${1}" \
             > "${BOOT_HOME_OVERRIDE}" 2>/dev/null || alog "could not write ${BOOT_HOME_OVERRIDE}"
     fi
     luna-send -w 8000 -n 1 'luna://com.webos.service.systemprofile/debug/rescan' '{}' >/dev/null 2>&1 || true
@@ -733,7 +746,24 @@ if start_online_probe; then
 fi
 
 # B. Bind-mount customized core webOS 10.3.0 Flutter Home assets (wolf OS + stock image removed)
-if [ -d "${FLUTTER_ASSETS}" ]; then
+if [ "${WOLFDEN_PATCH_LG_HOME}" != "1" ]; then
+    # Stock LG Home: drop any patch mounts a previous run left and let the
+    # keepAlive Home restart clean in the background.
+    reverted=0
+    if mount | grep -qE "weboshome-merged|com.webos.app.home/lib/libapp.so"; then
+        # The running Home has libapp.so mapped, which makes its bind mount
+        # busy: stop it first, and fall back to a lazy unmount.
+        pkill -f com.webos.app.home 2>/dev/null || true
+        sleep 1
+        for lg_mount in "${FLUTTER_ASSETS}" "${HOME_RESOURCES}" /usr/palm/applications/com.webos.app.home/lib/libapp.so; do
+            while mount | grep -q " ${lg_mount} "; do
+                umount "${lg_mount}" 2>/dev/null || umount -l "${lg_mount}" 2>/dev/null || break
+                reverted=$((reverted + 1))
+            done
+        done
+    fi
+    alog "LG Home left stock (WOLFDEN_PATCH_LG_HOME=0); removed ${reverted} patch mounts, $(mount | grep -cE 'weboshome-merged|com.webos.app.home/lib/libapp.so') left"
+elif [ -d "${FLUTTER_ASSETS}" ]; then
     umount "${FLUTTER_ASSETS}" 2>/dev/null || true
     umount "${HOME_RESOURCES}" 2>/dev/null || true
     REAL_I18N="$(readlink -f "${FLUTTER_ASSETS}/i18n" 2>/dev/null || echo "${HOME_RESOURCES}")"

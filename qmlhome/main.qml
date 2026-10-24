@@ -65,7 +65,7 @@ WebOSWindow {
         "hulu",
         "amazon"
     ]
-    readonly property int dockMax: 8
+    readonly property int dockMax: 6
     property var dockIds: defaultDockIds
     Settings {
         id: prefs
@@ -74,8 +74,26 @@ WebOSWindow {
         fileName: "/home/root/.config/wolfdenos/home.conf"
         category: "dock"
         property string ids: ""
+        property string trace: ""
+    }
+    // Debug channel that survives LG's log throttle: pmlog blocks qml-runner
+    // after a burst (NL_LOG_BLOCKED), and the video client alone bursts. The
+    // last lines go into the settings file, readable over telnet.
+    property var traceLines: []
+    property string traceUrl: ""
+    function dbg(msg) {
+        console.warn("wolfdenOS: " + msg);
+        if (traceUrl) {
+            try { var x = new XMLHttpRequest(); x.open("POST", traceUrl, true); x.send(msg); } catch (e) {}
+        }
+        // concat, not push: a var property hands out a copy of its array.
+        var lines = traceLines.concat([Qt.formatTime(new Date(), "hh:mm:ss") + " " + msg]);
+        if (lines.length > 24) { lines.shift(); }
+        traceLines = lines;
+        prefs.trace = lines.join(" | ");
     }
     function loadDock() {
+        root.dbg("prefs.ids = " + JSON.stringify(prefs.ids));
         try {
             var saved = prefs.ids ? JSON.parse(prefs.ids) : null;
             if (saved && saved.length !== undefined) { dockIds = saved; }
@@ -105,8 +123,8 @@ WebOSWindow {
     readonly property int idleDriftMs: 30 * 1000
 
     readonly property string appDir: "/media/developer/apps/usr/palm/applications/tld.wolfdenos.qmlhome/"
-    readonly property int tileSize: 172
-    readonly property int tileGap: 26
+    readonly property int tileSize: 124
+    readonly property int tileGap: 18
 
     // ------------------------------------------------------------------
     // Data: launch points straight from SAM, kept live by subscription.
@@ -138,31 +156,53 @@ WebOSWindow {
                 try { res = JSON.parse(res); } catch (e) { console.warn("luna: bad JSON"); return; }
             }
             if (!res) { return; }
-            if (res.launchPoints !== undefined || res.change !== undefined) { root.ingestLaunchPoints(res); }
+            if (res.launchPoints !== undefined) { root.ingestLaunchPoints(res); }
         }
     }
 
+    // The Service element keeps ONE live call: a second callService() on it
+    // silently ends the first subscription (found when a second one left the
+    // first mute). So the list comes from a single subscription to LG's own
+    // homelaunchpoints/listLaunchPoints -- the launch points after the hides
+    // apply.sh makes, i.e. what LG's Home would show, with full icon fields --
+    // preceded by one plain call to listAvailableLaunchPoints, which answers
+    // with the hidden ones, so Homebrew Channel (hidden by LG, wanted here)
+    // can be kept. The subscription is renewed whenever the home comes back
+    // to the front, since launching an app is a call on the same object.
+    readonly property var alwaysShow: ["org.webosbrew.hbchannel"]
+    property var keptHidden: []
+    property bool hiddenFetched: false
     function subscribeLaunchPoints() {
+        luna.service = "com.webos.service.homelaunchpoints";
+        if (!hiddenFetched) {
+            luna.method = "listAvailableLaunchPoints";
+            luna.callService({});
+            return;
+        }
         luna.method = "listLaunchPoints";
         luna.callService({ subscribe: true });
     }
 
     function ingestLaunchPoints(res) {
-        if (res.launchPoints === undefined) {
-            // An incremental change (added/removed/updated). Re-request the
-            // whole list rather than mirroring SAM's diff protocol.
-            subscribeLaunchPoints();
-            return;
-        }
-        console.warn("wolfdenOS: " + res.launchPoints.length + " launch points from SAM");
-        var list = [];
+        var visible = [], hidden = [];
         for (var i = 0; i < res.launchPoints.length; i++) {
             var lp = res.launchPoints[i];
-            if (hiddenIds.indexOf(lp.id) !== -1) { continue; }
-            if (lp.id.indexOf("tld.wolfdenos.") === 0) { continue; }
-            list.push(lp);
+            if (hiddenIds.indexOf(lp.id) !== -1 || lp.id.indexOf("tld.wolfdenos.") === 0) { continue; }
+            (lp.hidden ? hidden : visible).push(lp);
         }
-        allApps = list;
+        if (!hiddenFetched) {
+            // The one-shot reply: remember the hidden apps we still want, then
+            // start the real subscription.
+            hiddenFetched = true;
+            keptHidden = hidden.filter(function (lp) { return alwaysShow.indexOf(lp.id) !== -1; });
+            console.warn("wolfdenOS: " + hidden.length + " hidden launch points, keeping " + keptHidden.length);
+            subscribeLaunchPoints();
+            if (visible.length === 0) { return; }
+        }
+        // A late one-shot reply (hidden entries only) must not wipe the grid.
+        if (visible.length === 0 && hidden.length > 0) { return; }
+        root.dbg(visible.length + " visible launch points");
+        allApps = visible.concat(keptHidden);
         storeInstalled = findApp(storeId) !== null;
         rebuild();
     }
@@ -180,6 +220,7 @@ WebOSWindow {
         }
         var every = allApps.slice();
         every.sort(function (a, b) { return (a.title || "").localeCompare(b.title || ""); });
+        root.dbg("rebuild: " + allApps.length + " apps, dockIds " + JSON.stringify(dockIds) + " -> dock " + dock.length);
         dockApps = dock;
         gridApps = every;
         if (dockIndex > dockApps.length) { dockIndex = dockApps.length; }
@@ -193,6 +234,7 @@ WebOSWindow {
     }
 
     function launchApp(id) {
+        luna.service = "com.webos.applicationManager";
         luna.method = "launch";
         luna.callService({ id: id, params: {} });
     }
@@ -203,6 +245,7 @@ WebOSWindow {
     readonly property string storeId: "com.webos.app.discovery"
     property bool storeInstalled: false
     function launchStore(app) {
+        luna.service = "com.webos.applicationManager";
         luna.method = "launch";
         luna.callService({ id: storeId, params: { query: "featured", appId: app ? app.id : "" } });
     }
@@ -239,67 +282,76 @@ WebOSWindow {
     }
 
     // Sometimes the footage never comes back after another app had the video
-    // plane: the player sits in a non-playing state with no error. Six
-    // seconds after any play() without frames, the animated fallback takes
-    // over (and one reload is attempted); the moment real playback starts it
-    // steps aside again.
+    // plane. The player is no help: it can report PlayingState with a dead
+    // pipeline and a black plane behind it. What is reliable is position: a
+    // pulse every 4s compares it with the last one, and if it has not moved
+    // while we are live and in front, the animated fallback takes over (and
+    // one reload is attempted). The moment it moves again the fallback goes.
     property bool videoFailed: false
     property bool videoRetried: false
+    property int lastVideoPos: -1
     Timer {
-        id: videoWatch
-        interval: 6000
+        id: videoPulse
+        interval: 4000; repeat: true
+        running: root.idleStage === 0 && Qt.application.active
         onTriggered: {
-            if (bgVideo.playbackState === MediaPlayer.PlayingState) { return; }
-            console.warn("wolfdenOS: video not playing (status " + bgVideo.status + ", error " + bgVideo.error + "); fallback on");
+            var pos = bgVideo.position;
+            var moving = pos !== root.lastVideoPos;
+            root.lastVideoPos = pos;
+            if (moving) {
+                if (root.videoFailed) { root.dbg("video moving again, fallback off"); }
+                root.videoFailed = false; root.videoRetried = false;
+                return;
+            }
+            if (!root.videoFailed) {
+                root.dbg("video stalled at " + pos + " (state " + bgVideo.playbackState + ", status " + bgVideo.status + "); fallback on");
+            }
             root.videoFailed = true;
             if (!root.videoRetried) {
                 root.videoRetried = true;
                 var src = bgVideo.source; bgVideo.source = ""; bgVideo.source = src;
-                if (root.idleStage === 0 && Qt.application.active) { bgVideo.play(); videoWatch.restart(); }
+                bgVideo.play();
             }
         }
     }
 
+    // The app menu: two actions for the focused app, opened with the 0 key
+    // (a long press on OK was not reliably distinguishable from a tap on the
+    // Magic Remote). Focus moves to it while it is open and returns to
+    // whatever was underneath when it closes.
+    property var menuApp: null
+    property int menuIndex: 0
+    property bool menuOpen: menuApp !== null
+    function openMenu(app) { menuIndex = 0; menuApp = app; appMenu.forceActiveFocus(); root.dbg("menu for " + app.id); }
+    function closeMenu() {
+        menuApp = null;
+        if (gridOpen) { grid.forceActiveFocus(); } else { dock.forceActiveFocus(); }
+    }
+
     // Pause while another app is in front: nothing to see, and a looping
-    // decode in the background is just heat.
+    // decode in the background is just heat. Coming back also renews the
+    // launch-point subscription (launching was a call on the same Service).
     Connections {
         target: Qt.application
         onActiveChanged: {
-            if (Qt.application.active) { root.touch(); }
+            if (Qt.application.active) { root.touch(); root.subscribeLaunchPoints(); }
             else { bgVideo.pause(); }
         }
     }
 
-    // OK is press-to-open, hold-to-edit. The first press arms the timer, auto
-    // repeats are ignored, release before it fires is a tap.
-    property bool holdFired: false
-    Timer {
-        id: holdTimer
-        interval: 600
-        onTriggered: {
-            root.holdFired = true;
-            var a = root.gridOpen ? root.gridApps[root.gridIndex] : root.dockApps[root.dockIndex];
-            if (a) { root.toggleDock(a.id); }
-        }
-    }
-    function isOk(key) { return key === Qt.Key_Return || key === Qt.Key_Enter || key === Qt.Key_Select; }
-    function okPressed(event) {
-        if (!event.isAutoRepeat) { root.holdFired = false; holdTimer.restart(); }
-        event.accepted = true;
-    }
-    // Returns true when the release was a tap.
-    function okReleased(event) {
-        event.accepted = true;
-        if (holdTimer.running) { holdTimer.stop(); return !root.holdFired; }
-        return false;
-    }
-
     Component.onCompleted: {
-        loadDock();
         // Assigned, not setWindowProperty(): that one is not invokable from
-        // QML. This is how LG's own QML apps do it.
+        // QML. This is how LG's own QML apps do it. See the note at the top.
         root.windowProperties._WEBOS_ACCESS_POLICY_KEYS_BACK = true;
         root.windowProperties._WEBOS_ACCESS_POLICY_KEYS_EXIT = true;
+        // push_qmlhome.py --trace drops debug.url next to main.qml; absent in
+        // a normal install, so this is a no-op there.
+        try {
+            var r = new XMLHttpRequest();
+            r.open("GET", "file://" + root.appDir + "debug.url", false); r.send();
+            if (r.status === 200 || r.status === 0) { traceUrl = (r.responseText || "").trim(); }
+        } catch (e) {}
+        loadDock();
         subscribeLaunchPoints();
         touch();
         dock.forceActiveFocus();
@@ -333,10 +385,6 @@ WebOSWindow {
         loops: MediaPlayer.Infinite
         muted: true
         fillMode: VideoOutput.PreserveAspectCrop
-        onPlaybackStateChanged: {
-            if (playbackState === MediaPlayer.PlayingState) { root.videoFailed = false; root.videoRetried = false; videoWatch.stop(); }
-            else if (root.idleStage === 0 && Qt.application.active) { videoWatch.restart(); }
-        }
         onStatusChanged: { if (status === MediaPlayer.InvalidMedia) { root.videoFailed = true; } }
         onErrorChanged: { if (error !== MediaPlayer.NoError) { root.videoFailed = true; } }
     }
@@ -398,11 +446,12 @@ WebOSWindow {
 
     // Scrims: enough to keep the dock and clock legible over footage, no more.
     Rectangle {
-        anchors.left: parent.left; anchors.right: parent.right; anchors.bottom: parent.bottom
-        height: 420
+        anchors.left: parent.left; anchors.top: parent.top; anchors.bottom: parent.bottom
+        width: 560
         gradient: Gradient {
-            GradientStop { position: 0.0; color: "#00050506" }
-            GradientStop { position: 1.0; color: "#d9050506" }
+            orientation: Gradient.Horizontal
+            GradientStop { position: 0.0; color: "#d9050506" }
+            GradientStop { position: 1.0; color: "#00050506" }
         }
     }
     Rectangle {
@@ -456,10 +505,13 @@ WebOSWindow {
     Item {
         id: dock
         focus: !root.gridOpen
-        anchors.horizontalCenter: parent.horizontalCenter
-        anchors.bottom: parent.bottom; anchors.bottomMargin: 96
-        width: dockRow.width + 64
-        height: root.tileSize + 64
+        // Out of the way while All Apps is up: the panel is not fully opaque
+        // and the dock showed through it.
+        visible: !root.gridOpen
+        anchors.left: parent.left; anchors.leftMargin: 72
+        anchors.verticalCenter: parent.verticalCenter
+        width: root.tileSize + 56
+        height: dockColumn.height + 56
 
         Rectangle {
             anchors.fill: parent
@@ -468,8 +520,8 @@ WebOSWindow {
             border.color: "#40ffffff"; border.width: 2
         }
 
-        Row {
-            id: dockRow
+        Column {
+            id: dockColumn
             anchors.centerIn: parent
             spacing: root.tileGap
 
@@ -497,8 +549,8 @@ WebOSWindow {
                     border.width: allAppsTile.focused ? 3 : 1
                 }
                 Grid {
-                    anchors.centerIn: parent; columns: 2; spacing: 14
-                    Repeater { model: 4; Rectangle { width: 30; height: 30; radius: 8; color: "white" } }
+                    anchors.centerIn: parent; columns: 2; spacing: 10
+                    Repeater { model: 4; Rectangle { width: 22; height: 22; radius: 6; color: "white" } }
                 }
             }
         }
@@ -506,19 +558,20 @@ WebOSWindow {
         Keys.onPressed: {
             root.touch();
             switch (event.key) {
-            case Qt.Key_Left:
+            case Qt.Key_Up:
                 if (root.dockIndex > 0) { root.dockIndex--; }
                 event.accepted = true; break;
-            case Qt.Key_Right:
+            case Qt.Key_Down:
                 if (root.dockIndex < root.dockApps.length) { root.dockIndex++; }
                 event.accepted = true; break;
             case Qt.Key_Return: case Qt.Key_Enter: case Qt.Key_Select:
-                if (root.dockIndex === root.dockApps.length) {
-                    // All Apps has nothing to hold for; open on press.
-                    if (!event.isAutoRepeat) { root.gridOpen = true; grid.forceActiveFocus(); }
-                    event.accepted = true;
-                } else { root.okPressed(event); }
-                break;
+                if (event.isAutoRepeat) { event.accepted = true; break; }
+                if (root.dockIndex === root.dockApps.length) { root.gridOpen = true; grid.forceActiveFocus(); }
+                else if (root.dockApps[root.dockIndex]) { root.launchApp(root.dockApps[root.dockIndex].id); }
+                event.accepted = true; break;
+            case Qt.Key_0:
+                if (!event.isAutoRepeat && root.dockApps[root.dockIndex]) { root.openMenu(root.dockApps[root.dockIndex]); }
+                event.accepted = true; break;
             case Qt.Key_Back: case 0x01200003:
                 // The home screen is the floor: BACK here goes nowhere. Quitting
                 // instead hands the screen to SAM's last-app fallback, which is
@@ -526,27 +579,19 @@ WebOSWindow {
                 event.accepted = true; break;
             }
         }
-        Keys.onReleased: {
-            if (!root.isOk(event.key) || root.dockIndex === root.dockApps.length) { return; }
-            if (root.okReleased(event) && root.dockApps[root.dockIndex]) {
-                root.launchApp(root.dockApps[root.dockIndex].id);
-            }
-        }
     }
 
-    Column {
-        anchors.horizontalCenter: parent.horizontalCenter
-        anchors.bottom: parent.bottom; anchors.bottomMargin: 28
-        spacing: 4
+    // The focused tile's name, beside the dock at the tile's height.
+    Text {
         visible: !root.gridOpen
-        Text {
-            anchors.horizontalCenter: parent.horizontalCenter
-            text: root.dockIndex === root.dockApps.length ? "All Apps"
-                  : (root.dockApps[root.dockIndex] ? root.dockApps[root.dockIndex].title : "")
-            color: "white"
-            font.family: "LG Smart UI"; font.pixelSize: 30; font.weight: Font.DemiBold
-            style: Text.Raised; styleColor: "#80000000"
-        }
+        x: dock.x + dock.width + 26
+        y: dock.y + 28 + root.dockIndex * (root.tileSize + root.tileGap) + root.tileSize / 2 - height / 2
+        Behavior on y { NumberAnimation { duration: 140; easing.type: Easing.OutCubic } }
+        text: root.dockIndex === root.dockApps.length ? "All Apps"
+              : (root.dockApps[root.dockIndex] ? root.dockApps[root.dockIndex].title : "")
+        color: "white"
+        font.family: "LG Smart UI"; font.pixelSize: 30; font.weight: Font.DemiBold
+        style: Text.Raised; styleColor: "#80000000"
     }
 
     // ------------------------------------------------------------------
@@ -570,42 +615,6 @@ WebOSWindow {
             font.family: "LG Smart UI"; font.pixelSize: 44; font.weight: Font.DemiBold
         }
 
-        // Update button, top right. Up from the grid's first row lands here.
-        property bool headerFocused: false
-        Rectangle {
-            id: updateButton
-            anchors.right: parent.right; anchors.rightMargin: 120
-            anchors.verticalCenter: gridTitle.verticalCenter
-            width: updateLabel.width + 56; height: 64; radius: 32
-            visible: root.storeInstalled
-            color: gridPanel.headerFocused ? "#40ffffff" : "#14ffffff"
-            border.color: gridPanel.headerFocused ? "#ffffff" : "#26ffffff"
-            border.width: gridPanel.headerFocused ? 3 : 1
-            Text {
-                id: updateLabel
-                anchors.centerIn: parent
-                text: {
-                    var a = root.gridApps[root.gridIndex];
-                    return "Update " + (a ? a.title : "") + " in LG Store";
-                }
-                color: "white"
-                font.family: "LG Smart UI"; font.pixelSize: 24; font.weight: Font.DemiBold
-            }
-            Keys.onPressed: {
-                root.touch();
-                switch (event.key) {
-                case Qt.Key_Down:
-                    gridPanel.headerFocused = false; grid.forceActiveFocus(); break;
-                case Qt.Key_Return: case Qt.Key_Enter: case Qt.Key_Select:
-                    if (!event.isAutoRepeat) { root.launchStore(root.gridApps[root.gridIndex]); } break;
-                case Qt.Key_Back: case 0x01200003:
-                    gridPanel.headerFocused = false; root.gridOpen = false; dock.forceActiveFocus(); break;
-                default: return;
-                }
-                event.accepted = true;
-            }
-        }
-
         GridView {
             id: grid
             anchors.top: gridTitle.bottom; anchors.topMargin: 48
@@ -621,7 +630,7 @@ WebOSWindow {
             delegate: Item {
                 width: grid.cellWidth; height: grid.cellHeight
                 property var app: root.gridApps[index]
-                property bool focused: root.gridOpen && !gridPanel.headerFocused && root.gridIndex === index
+                property bool focused: root.gridOpen && !root.menuOpen && root.gridIndex === index
                 Rectangle {
                     anchors.fill: parent; anchors.margins: 12; radius: 22
                     color: focused ? "#40ffffff" : "#14ffffff"
@@ -669,24 +678,19 @@ WebOSWindow {
                 switch (event.key) {
                 case Qt.Key_Left:  if (root.gridIndex > 0) { root.gridIndex--; } break;
                 case Qt.Key_Right: if (root.gridIndex < n - 1) { root.gridIndex++; } break;
-                case Qt.Key_Up:
-                    if (root.gridIndex - cols >= 0) { root.gridIndex -= cols; }
-                    else if (root.storeInstalled) { gridPanel.headerFocused = true; updateButton.forceActiveFocus(); }
-                    break;
+                case Qt.Key_Up:    if (root.gridIndex - cols >= 0) { root.gridIndex -= cols; } break;
                 case Qt.Key_Down:  if (root.gridIndex + cols < n) { root.gridIndex += cols; } break;
                 case Qt.Key_Return: case Qt.Key_Enter: case Qt.Key_Select:
-                    root.okPressed(event); return;
+                    if (!event.isAutoRepeat && root.gridApps[root.gridIndex]) { root.launchApp(root.gridApps[root.gridIndex].id); }
+                    break;
+                case Qt.Key_0:
+                    if (!event.isAutoRepeat && root.gridApps[root.gridIndex]) { root.openMenu(root.gridApps[root.gridIndex]); }
+                    break;
                 case Qt.Key_Back: case 0x01200003:
                     root.gridOpen = false; dock.forceActiveFocus(); break;
                 default: return;
                 }
                 event.accepted = true;
-            }
-            Keys.onReleased: {
-                if (!root.isOk(event.key)) { return; }
-                if (root.okReleased(event) && root.gridApps[root.gridIndex]) {
-                    root.launchApp(root.gridApps[root.gridIndex].id);
-                }
             }
         }
 
@@ -696,13 +700,104 @@ WebOSWindow {
             text: {
                 var a = root.gridApps[root.gridIndex];
                 if (!a) { return ""; }
-                var line = root.isDocked(a.id) ? "Press OK to open.   Hold to remove from dock."
-                           : (root.dockIds.length >= root.dockMax ? "Press OK to open.   Dock is full."
-                                                                  : "Press OK to open.   Hold to add to dock.");
-                return root.storeInstalled ? line + "   Up for updates." : line;
+                return "Press OK to open.   Press 0 for options.";
             }
             color: "#b3ffffff"
             font.family: "LG Smart UI"; font.pixelSize: 22
+        }
+    }
+
+    // ------------------------------------------------------------------
+    // App menu (hold OK on a tile)
+    // ------------------------------------------------------------------
+
+    Item {
+        id: appMenu
+        anchors.fill: parent
+        // Visible the instant it opens (forceActiveFocus is refused on an
+        // invisible item; the opacity Behavior starts at 0), fades on close.
+        visible: root.menuOpen || opacity > 0
+        opacity: root.menuOpen ? 1 : 0
+        Behavior on opacity { NumberAnimation { duration: 140 } }
+
+        Rectangle { anchors.fill: parent; color: "#80000000" }
+
+        Rectangle {
+            id: menuPanel
+            anchors.centerIn: parent
+            width: 620; height: menuColumn.height + 64
+            radius: 28
+            color: "#f2141416"
+            border.color: "#40ffffff"; border.width: 2
+
+            Column {
+                id: menuColumn
+                anchors.horizontalCenter: parent.horizontalCenter
+                anchors.top: parent.top; anchors.topMargin: 32
+                spacing: 18
+
+                Row {
+                    anchors.horizontalCenter: parent.horizontalCenter
+                    spacing: 22
+                    Tile {
+                        size: 96; radius: 20
+                        app: root.menuApp
+                        icon: root.menuApp ? root.iconFor(root.menuApp) : ""
+                    }
+                    Text {
+                        anchors.verticalCenter: parent.verticalCenter
+                        text: root.menuApp ? root.menuApp.title : ""
+                        color: "white"; elide: Text.ElideRight; width: 380
+                        font.family: "LG Smart UI"; font.pixelSize: 34; font.weight: Font.DemiBold
+                    }
+                }
+
+                Item { width: 1; height: 6 }
+
+                Repeater {
+                    model: 2
+                    Rectangle {
+                        width: 540; height: 76; radius: 18
+                        anchors.horizontalCenter: parent.horizontalCenter
+                        property bool current: root.menuIndex === index
+                        property bool enabled: index === 0 ? root.storeInstalled
+                                               : !!(root.menuApp && (root.isDocked(root.menuApp.id) || root.dockIds.length < root.dockMax))
+                        color: current ? "#40ffffff" : "#14ffffff"
+                        border.color: current ? "#ffffff" : "#26ffffff"; border.width: current ? 3 : 1
+                        opacity: enabled ? 1 : 0.4
+                        Text {
+                            anchors.centerIn: parent
+                            text: index === 0 ? (root.storeInstalled ? "Check for Update" : "Check for Update (store unavailable)")
+                                  : (root.menuApp && root.isDocked(root.menuApp.id) ? "Remove from Dock"
+                                     : (root.dockIds.length >= root.dockMax ? "Add to Dock (dock is full)" : "Add to Dock"))
+                            color: "white"
+                            font.family: "LG Smart UI"; font.pixelSize: 28; font.weight: Font.DemiBold
+                        }
+                    }
+                }
+            }
+        }
+
+        Keys.onPressed: {
+            root.touch();
+            if (!root.menuOpen) { return; }
+            switch (event.key) {
+            case Qt.Key_Up:   if (root.menuIndex > 0) { root.menuIndex--; } break;
+            case Qt.Key_Down: if (root.menuIndex < 1) { root.menuIndex++; } break;
+            case Qt.Key_Return: case Qt.Key_Enter: case Qt.Key_Select:
+                if (event.isAutoRepeat) { break; }
+                if (root.menuIndex === 0) {
+                    if (root.storeInstalled) { var a = root.menuApp; root.closeMenu(); root.launchStore(a); }
+                } else {
+                    var id = root.menuApp.id;
+                    if (root.toggleDock(id)) { root.closeMenu(); }
+                }
+                break;
+            case Qt.Key_Back: case 0x01200003:
+                root.closeMenu(); break;
+            default: return;
+            }
+            event.accepted = true;
         }
     }
 

@@ -89,27 +89,32 @@ To revert all modifications back to factory stock webOS:
 - `general.defaultApps.home` in settingsservice points at it, asserted by
   `apply.sh` on every boot. HOME from any app, including LG's Home, opens it
   through `launchDefaultApp {"category":"home"}`.
-- The TV boots straight into it: bootd's boot-time home comes from the
-  systemprofile `defaultApps` profile, overridden by a one-line file in
-  `/var/webos-profile/override/` that `apply.sh` writes (and every fallback
-  path deletes). LG's Home is not shown at power-on.
+- The TV boots straight into it, and "exit app" lands on it: bootd's
+  boot-time home and SAM's idle-app fallback both come from the systemprofile,
+  overridden by a one-line file in `/var/webos-profile/override/` that
+  `apply.sh` writes (and every fallback path deletes). LG's Home is never
+  shown unless a fallback hands HOME back to it.
 - Live video background (`home-bg.mp4`, hardware video plane) with an OLED
   idle guard (still after 15 min, black with a drifting dim clock after 20),
-  12-hour clock and date top right, a neutral glass dock of four apps plus
-  an All Apps tile, and an All Apps grid. Tiles are the app's own artwork edge
+  12-hour clock and date top right, a neutral glass dock on the left edge
+  (four apps by default plus an All Apps tile), and an All Apps grid. Tiles are the app's own artwork edge
   to edge. Apps come live from SAM's `listLaunchPoints` subscription.
 - BACK closes All Apps and is otherwise a no-op; EXIT is swallowed. The home
   screen never quits itself (NOTES.md, "things that cost real time", says why).
-- Hold OK on any app in All Apps to add it to the dock (blue halo marks the
-  docked ones), hold OK on a dock tile to remove it; saved in
-  `/home/root/.config/wolfdenos/home.conf`. Up from the grid's first row is
-  "Update <app> in LG Store": the Content Store stays installed as the only
-  update route. If the footage fails to come back, an animated type-wall
+- Press 0 on any tile (All Apps or dock) for its menu: "Check for Update"
+  opens LG's Content Store, which stays installed as the only update route;
+  "Add to Dock" / "Remove from Dock" edits the dock (blue halo marks docked
+  apps), saved in `/home/root/.config/wolfdenos/home.conf`. The dock is a
+  vertical glass column on the left edge, up to six apps plus All Apps. If the footage fails to come back, an animated type-wall
   shader stands in until it does.
 - The retired web launcher (`launcher/`, `tld.wolfdenos.home`) is not
   installed (`WOLFDEN_INSTALL_LAUNCHER=0`); its source stays for reference.
 
-### 3. Native LG Home (`com.webos.app.home`) Core Modifications (`wolf OS`)
+### 3. LG Home (`com.webos.app.home`): stock, plus the system-level work
+- **LG's Home itself is left stock** (`WOLFDEN_PATCH_LG_HOME=0` in
+  `debloat_home.sh`): with ours as home, boot and idle app nobody sees it.
+  The banner, string and `libapp.so` patches below still exist and are
+  staged by the deploy, and switch back on with the flag.
 - **Non-Destructive RAM Bind-Mount Overlay**:
   - Copies `/usr/palm/applications/com.webos.app.home/data/flutter_assets/assets` to `/tmp/weboshome-merged` and bind-mounts it over `assets` (and `/tmp/weboshome-merged/i18n` over `/usr/palm/applications/com.webos.app.home/resources`).
 - **Stock LG Banner Image Removed**:

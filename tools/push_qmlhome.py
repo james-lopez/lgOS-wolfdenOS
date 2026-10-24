@@ -44,6 +44,8 @@ def main(argv=None):
                         help="TV address (default: $WOLFDEN_TV or .tv-ip)")
     parser.add_argument("--capture", help="also pull a graphics-plane capture to this path")
     parser.add_argument("--wait", type=int, default=9, help="seconds to give the app after launch")
+    parser.add_argument("--trace", type=int, default=0, metavar="SECONDS",
+                        help="after the relaunch, keep serving and print the app's dbg() POSTs for this long")
     args = parser.parse_args(argv)
 
     qml_files = sorted(os.path.basename(p) for p in glob.glob(os.path.join(QMLHOME_DIR, "*.qml")))
@@ -51,8 +53,14 @@ def main(argv=None):
         print("error: no .qml files in %s" % QMLHOME_DIR, file=sys.stderr)
         return 1
 
-    handler = functools.partial(http.server.SimpleHTTPRequestHandler, directory=QMLHOME_DIR)
-    handler.log_message = lambda *a: None
+    class Handler(http.server.SimpleHTTPRequestHandler):
+        def log_message(self, *a): pass
+        def do_POST(self):
+            n = int(self.headers.get("Content-Length") or 0)
+            body = self.rfile.read(n).decode("utf-8", "replace")
+            print("  [tv] " + body, flush=True)
+            self.send_response(204); self.end_headers()
+    handler = functools.partial(Handler, directory=QMLHOME_DIR)
     server = http.server.HTTPServer(("0.0.0.0", 0), handler)
     port = server.server_address[1]
     threading.Thread(target=server.serve_forever, daemon=True).start()
@@ -62,6 +70,12 @@ def main(argv=None):
 
     fetch = "\n".join("curl -s -m 30 -o %s/%s http://%s:%d/%s" % (APP_DIR, f, local_ip, port, f)
                       for f in qml_files)
+    # debug.url makes main.qml POST its dbg() lines back here. It is removed
+    # again unless --trace asked for it, so a plain push leaves nothing behind.
+    if args.trace:
+        fetch += "\necho 'http://%s:%d/trace' > %s/debug.url" % (local_ip, port, APP_DIR)
+    else:
+        fetch += "\nrm -f %s/debug.url" % APP_DIR
     script = """
 %s
 echo "pushed: %s"
@@ -84,6 +98,10 @@ grep -hE "qml-runner \\[\\] %s" /var/log/dbg-log 2>/dev/null | tail -40 | cut -c
             continue
         print(line)
 
+    if args.trace:
+        import time
+        print("--- tracing for %ds (dbg() lines from the TV) ---" % args.trace, flush=True)
+        time.sleep(args.trace)
     if args.capture:
         return tv_shell.pull(args.host, "/tmp/push.png", args.capture, 60)
     return 0
