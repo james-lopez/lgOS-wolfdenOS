@@ -656,7 +656,10 @@ WebOSWindow {
             switch (event.key) {
             case Qt.Key_Up:
                 if (root.dockIndex > 0) { root.dockIndex--; }
-                else { root.pillFocused = true; modePill.forceActiveFocus(); }
+                event.accepted = true; break;
+            case Qt.Key_Right:
+                // The pill is to the right of the dock; Right goes there.
+                root.pillFocused = true; modePill.forceActiveFocus();
                 event.accepted = true; break;
             case Qt.Key_Down:
                 if (root.dockIndex < (root.homeMode === "apps" ? root.dockApps.length : root.inputs.length - 1)) { root.dockIndex++; }
@@ -770,11 +773,16 @@ WebOSWindow {
         Keys.onPressed: {
             root.touch();
             switch (event.key) {
-            case Qt.Key_Left: case Qt.Key_Right:
+            // Directional, like the thumb: Right slides to Inputs, Left back
+            // to Apps, and Left from Apps leaves the pill for the dock.
+            case Qt.Key_Right:
                 if (event.isAutoRepeat) { break; }
-                root.homeMode = root.homeMode === "apps" ? "inputs" : "apps";
-                root.dockIndex = 0;
-                if (root.homeMode === "inputs") { root.loadInputs(); }
+                if (root.homeMode === "apps") { root.homeMode = "inputs"; root.dockIndex = 0; root.loadInputs(); }
+                break;
+            case Qt.Key_Left:
+                if (event.isAutoRepeat) { break; }
+                if (root.homeMode === "inputs") { root.homeMode = "apps"; root.dockIndex = 0; }
+                else { root.pillFocused = false; dock.forceActiveFocus(); }
                 break;
             case Qt.Key_Down: case Qt.Key_Return: case Qt.Key_Enter: case Qt.Key_Select:
                 root.pillFocused = false; dock.forceActiveFocus(); break;

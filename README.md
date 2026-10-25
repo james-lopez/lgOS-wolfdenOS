@@ -106,8 +106,8 @@ To revert all modifications back to factory stock webOS:
   "Add to Dock" / "Remove from Dock" edits the dock (blue halo marks docked
   apps), saved in `/home/root/.config/wolfdenos/home.conf`. The dock is a
   vertical glass column on the left edge, up to six apps plus All Apps.
-  A glass pill at the top middle of the main screen (Up from the first dock
-  tile) switches the dock between **Apps** and **Inputs**: the HDMI ports
+  A glass pill at the top middle of the main screen (Right from the dock)
+  switches the dock between **Apps** and **Inputs**: the HDMI ports
   from the External Input Manager, a green dot when a device is actually
   plugged in; OK switches to that input. If the footage fails to come back, an animated type-wall
   shader stands in until it does.

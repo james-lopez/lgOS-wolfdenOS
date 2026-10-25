@@ -586,8 +586,9 @@ tiles, six apps max, name beside the focused tile).
 `Service` element holds one live call, the eim fetch replaces the
 launch-point subscription for a moment; its reply handler re-subscribes.
 The switcher is a glass pill at the top middle of the *main* screen (it
-started life in All Apps and moved on request): Up from the first dock
-tile reaches it, Left/Right flips, Down returns, and in Inputs mode the
+started life in All Apps and moved on request): Right from the dock
+reaches it, Right/Left move the thumb the way it slides (Left from Apps
+goes back to the dock), Down returns, and in Inputs mode the
 left dock column shows the ports instead of the apps. On "connected":
 eim reported HDMI 1 and 2 `connected: true` with nothing plugged into the
 TV; that flag means the port is enabled and listed, not that a cable is
