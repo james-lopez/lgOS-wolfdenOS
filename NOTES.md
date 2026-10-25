@@ -575,7 +575,24 @@ dock tile. A hold-on-OK version came first (600 ms timer, auto-repeats
 ignored, release before the timer is a tap); on the Magic Remote the hold
 never registered as different from a tap, so a dedicated key won. The
 dock moved to a vertical column on the left edge at the same time (124 px
-tiles, six apps max, name beside the focused tile). Docked apps carry a blue halo (`Rectangle` + `Glow` from
+tiles, six apps max, name beside the focused tile).
+
+**Inputs come from `com.webos.service.eim/getAllInputStatus`.** One call,
+`devices[]` with `id` (`HDMI_1`..), `label` (the user's name for the port,
+"Input Source 5" is LG's default for an unnamed one), `connected`, `appId`
+(`com.webos.app.hdmiN`, launchable like any app) and an icon path
+(`iconPrefix` + `icon`, under `/usr/palm/plugins/inputapps/assets/small/`).
+`com.webos.service.tv.inputs` does not exist on this firmware. Because the
+`Service` element holds one live call, the eim fetch replaces the
+launch-point subscription for a moment; its reply handler re-subscribes.
+The switcher is a glass pill at the top middle of the *main* screen (it
+started life in All Apps and moved on request): Up from the first dock
+tile reaches it, Left/Right flips, Down returns, and in Inputs mode the
+left dock column shows the ports instead of the apps. On "connected":
+eim reported HDMI 1 and 2 `connected: true` with nothing plugged into the
+TV; that flag means the port is enabled and listed, not that a cable is
+in. `hdmiPlugIn` is the cable and `hdmiSignalExist` the signal, so the
+tiles key off `hdmiPlugIn`. Docked apps carry a blue halo (`Rectangle` + `Glow` from
 QtGraphicalEffects) around the artwork. The list is kept with
 `Qt.labs.settings` -- which only initialises with an explicit `fileName`
 here, since qml-runner sets no `organizationName` ("Failed to initialize
@@ -709,6 +726,16 @@ Now a 1s pulse calls the video live only when position has *advanced* and
 the state is playing; the wall is shown whenever it is not live (launch,
 return from an app, reload), cross-faded both ways. Measured: live 1.3s
 after launch, the wall covers that, no black at any point.
+
+**The wall flashed once per loop.** The clip is 40.3s and `loops: Infinite`
+goes through uMedia's end-of-stream path, which parks position at exactly
+the clip length for about two seconds while it rewinds -- the trace read
+"stalled at 40306", then "live at 145". Two fixes: the pulse treats any
+position change while playing as frames flowing (a backwards jump is the
+wrap, not a stall) and tolerates up to six stuck seconds within 1.5s of the
+end; and `onPositionChanged` seeks to 0 itself 700ms before the end, which
+keeps the pipeline primed and skips the park entirely. Traced over two
+loops afterwards: one "live" line at launch and nothing else.
 
 **Boot went LG Home → LG Home → ours, and the HOME key was never the
 reason.** On a power-on the TV showed stock LG Home, then the patched LG Home,

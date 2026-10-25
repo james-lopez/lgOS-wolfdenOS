@@ -136,6 +136,18 @@ WebOSWindow {
     property int dockIndex: 0       // 0..dockApps.length; the last is All Apps
     property int gridIndex: 0
     property bool gridOpen: false
+    // The main screen has a pill switcher top middle: Apps shows the dock,
+    // Inputs swaps the dock for the HDMI ports (External Input Manager,
+    // com.webos.service.eim). Up from the first tile reaches the pill.
+    property string homeMode: "apps"
+    property bool pillFocused: false
+    property var inputs: []
+    function loadInputs() {
+        luna.service = "com.webos.service.eim";
+        luna.method = "getAllInputStatus";
+        luna.callService({});
+    }
+    readonly property var dockItems: homeMode === "inputs" ? inputs : dockApps
 
     // One Service object, not one per method. Each Service registers on the
     // luna bus under the app's id, and a second registration of the same name
@@ -157,6 +169,13 @@ WebOSWindow {
             }
             if (!res) { return; }
             if (res.launchPoints !== undefined) { root.ingestLaunchPoints(res); }
+            else if (res.devices !== undefined) {
+                root.inputs = res.devices;
+                if (root.homeMode === "inputs" && root.dockIndex >= root.inputs.length) { root.dockIndex = 0; }
+                root.dbg(root.inputs.length + " inputs from eim");
+                // That call took the Service's one slot; put the list back.
+                root.subscribeLaunchPoints();
+            }
         }
     }
 
@@ -300,8 +319,11 @@ WebOSWindow {
         running: root.idleStage === 0 && Qt.application.active
         onTriggered: {
             var pos = bgVideo.position;
-            var advanced = root.lastVideoPos >= 0 && pos > root.lastVideoPos
-                           && bgVideo.playbackState === MediaPlayer.PlayingState;
+            var playing = bgVideo.playbackState === MediaPlayer.PlayingState;
+            // Moved forward, or wrapped: the clip loops (40s), and at the
+            // boundary position drops from the end to ~1s, which is frames
+            // flowing, not a stall. The first wall flash per loop was that.
+            var advanced = root.lastVideoPos >= 0 && playing && pos !== root.lastVideoPos;
             root.lastVideoPos = pos;
             if (advanced) {
                 if (!root.videoLive) { root.dbg("video live at " + pos); }
@@ -309,6 +331,13 @@ WebOSWindow {
                 return;
             }
             root.stalledPulses++;
+            // The loop boundary is not a stall either: uMedia parks position
+            // at the end for a couple of seconds while it rewinds (seen as
+            // "stalled at 40306", the clip's exact length). Give it longer
+            // there. Elsewhere, two stuck pulses before the wall: a single
+            // missed second is not worth a cross-fade.
+            var atEnd = bgVideo.duration > 0 && pos >= bgVideo.duration - 1500;
+            if (root.videoLive && root.stalledPulses < (atEnd ? 6 : 2)) { return; }
             if (root.videoLive) { root.dbg("video stalled at " + pos + " (state " + bgVideo.playbackState + ", status " + bgVideo.status + ")"); }
             root.videoLive = false;
             // One reload after a few seconds of nothing, then leave it to the wall.
@@ -359,6 +388,7 @@ WebOSWindow {
         } catch (e) {}
         loadDock();
         subscribeLaunchPoints();
+        loadInputs();
         touch();
         dock.forceActiveFocus();
     }
@@ -391,6 +421,12 @@ WebOSWindow {
         loops: MediaPlayer.Infinite
         muted: true
         fillMode: VideoOutput.PreserveAspectCrop
+        // Rewind before EOS rather than letting the loop handle it: the
+        // EOS path parks the pipeline for ~2s at the end; a seek while
+        // playing keeps it primed.
+        onPositionChanged: {
+            if (duration > 0 && position >= duration - 700 && playbackState === MediaPlayer.PlayingState) { seek(0); }
+        }
         onStatusChanged: { if (status === MediaPlayer.InvalidMedia) { root.videoLive = false; } }
         onErrorChanged: { if (error !== MediaPlayer.NoError) { root.videoLive = false; } }
     }
@@ -407,16 +443,22 @@ WebOSWindow {
         Behavior on opacity { NumberAnimation { duration: 500 } }
         property real t: 0
         property real aspect: width / height
+        property real cells: 22.0
         NumberAnimation on t { from: 0; to: 3600; duration: 3600000; loops: Animation.Infinite; running: typeWall.visible }
-        fragmentShader: "
+        fragmentShader: root.wallShader
+    }
+    // The wall's fragment shader, shared with the All Apps tile. "cells" is
+    // the number of rows; the tile uses a handful, the floor twenty-two.
+    readonly property string wallShader: "
             varying highp vec2 qt_TexCoord0;
             uniform lowp float qt_Opacity;
             uniform highp float t;
             uniform highp float aspect;
+            uniform highp float cells;
             highp float hash(highp vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
             highp vec3 neon(highp float h) { return 0.55 + 0.45 * cos(6.28318 * (h + vec3(0.0, 0.33, 0.67))); }
             void main() {
-                highp vec2 uv = vec2(qt_TexCoord0.x * aspect, qt_TexCoord0.y) * 22.0;
+                highp vec2 uv = vec2(qt_TexCoord0.x * aspect, qt_TexCoord0.y) * cells;
                 highp vec2 g = floor(uv);
                 highp vec2 f = fract(uv);
                 highp float r = hash(g);
@@ -437,7 +479,6 @@ WebOSWindow {
                 highp vec3 bg = vec3(0.03, 0.03, 0.035) + hue * glow;
                 gl_FragColor = vec4(mix(bg, col, stroke), 1.0) * qt_Opacity;
             }"
-    }
 
     // Idle still, above the video. Faded in when the video is paused so the
     // last decoded frame never sits there as a burn-in risk of its own.
@@ -534,31 +575,78 @@ WebOSWindow {
             spacing: root.tileGap
 
             Repeater {
-                model: root.dockApps.length
+                model: root.homeMode === "apps" ? root.dockApps.length : 0
                 delegate: Tile {
                     app: root.dockApps[index]
                     icon: app ? root.iconFor(app) : ""
                     size: root.tileSize
-                    focused: !root.gridOpen && root.dockIndex === index
+                    focused: !root.gridOpen && !root.pillFocused && root.dockIndex === index
+                }
+            }
+
+            // Inputs: one glass tile per HDMI port, a green dot when a
+            // device is actually plugged in (eim's "connected" only means the
+            // port is enabled; hdmiPlugIn is the cable).
+            Repeater {
+                model: root.homeMode === "inputs" ? root.inputs.length : 0
+                delegate: Item {
+                    property var dev: root.inputs[index]
+                    property bool focused: !root.gridOpen && !root.pillFocused && root.dockIndex === index
+                    width: root.tileSize; height: root.tileSize
+                    scale: focused ? 1.12 : 1.0
+                    Behavior on scale { NumberAnimation { duration: 140; easing.type: Easing.OutCubic } }
+                    Rectangle {
+                        anchors.fill: parent; radius: 30
+                        color: focused ? "#33ffffff" : "#14ffffff"
+                        border.color: focused ? "#ffffff" : "#59ffffff"
+                        border.width: focused ? 3 : 1
+                    }
+                    Image {
+                        anchors.centerIn: parent
+                        width: 76; height: 76
+                        source: dev ? "file://" + dev.iconPrefix + dev.icon : ""
+                        fillMode: Image.PreserveAspectFit; asynchronous: true; smooth: true
+                        opacity: dev && dev.hdmiPlugIn ? 1 : 0.5
+                    }
+                    Rectangle {
+                        anchors.right: parent.right; anchors.top: parent.top; anchors.margins: 12
+                        width: 14; height: 14; radius: 7
+                        color: dev && dev.hdmiPlugIn ? "#4ade80" : "#40ffffff"
+                    }
                 }
             }
 
             // All Apps
             Item {
                 id: allAppsTile
+                visible: root.homeMode === "apps"
                 width: root.tileSize; height: root.tileSize
-                property bool focused: !root.gridOpen && root.dockIndex === root.dockApps.length
+                property bool focused: !root.gridOpen && !root.pillFocused && root.dockIndex === root.dockApps.length
                 scale: focused ? 1.12 : 1.0
                 Behavior on scale { NumberAnimation { duration: 140; easing.type: Easing.OutCubic } }
+                // A live miniature of the landing's type wall, rounded, under
+                // a glass ring: the same scene at tile size, a few cells wide.
+                ShaderEffect {
+                    id: tileWall
+                    anchors.fill: parent
+                    visible: false
+                    property real t: 0
+                    property real aspect: 1.0
+                    property real cells: 4.0
+                    NumberAnimation on t { from: 0; to: 3600; duration: 3600000; loops: Animation.Infinite; running: dock.visible }
+                    fragmentShader: root.wallShader
+                }
+                Rectangle { id: tileShape; anchors.fill: parent; radius: 30; visible: false }
+                OpacityMask { anchors.fill: parent; source: tileWall; maskSource: tileShape }
                 Rectangle {
                     anchors.fill: parent; radius: 30
-                    color: allAppsTile.focused ? "#66ffffff" : "#2effffff"
-                    border.color: allAppsTile.focused ? "#ffffff" : "#40ffffff"
+                    color: allAppsTile.focused ? "#33ffffff" : "#14ffffff"
+                    border.color: allAppsTile.focused ? "#ffffff" : "#59ffffff"
                     border.width: allAppsTile.focused ? 3 : 1
                 }
                 Grid {
                     anchors.centerIn: parent; columns: 2; spacing: 10
-                    Repeater { model: 4; Rectangle { width: 22; height: 22; radius: 6; color: "white" } }
+                    Repeater { model: 4; Rectangle { width: 22; height: 22; radius: 6; color: "white"; border.color: "#40000000"; border.width: 1 } }
                 }
             }
         }
@@ -568,17 +656,20 @@ WebOSWindow {
             switch (event.key) {
             case Qt.Key_Up:
                 if (root.dockIndex > 0) { root.dockIndex--; }
+                else { root.pillFocused = true; modePill.forceActiveFocus(); }
                 event.accepted = true; break;
             case Qt.Key_Down:
-                if (root.dockIndex < root.dockApps.length) { root.dockIndex++; }
+                if (root.dockIndex < (root.homeMode === "apps" ? root.dockApps.length : root.inputs.length - 1)) { root.dockIndex++; }
                 event.accepted = true; break;
             case Qt.Key_Return: case Qt.Key_Enter: case Qt.Key_Select:
                 if (event.isAutoRepeat) { event.accepted = true; break; }
-                if (root.dockIndex === root.dockApps.length) { root.gridOpen = true; grid.forceActiveFocus(); }
+                if (root.homeMode === "inputs") {
+                    if (root.inputs[root.dockIndex]) { root.launchApp(root.inputs[root.dockIndex].appId); }
+                } else if (root.dockIndex === root.dockApps.length) { root.gridOpen = true; grid.forceActiveFocus(); }
                 else if (root.dockApps[root.dockIndex]) { root.launchApp(root.dockApps[root.dockIndex].id); }
                 event.accepted = true; break;
             case Qt.Key_0:
-                if (!event.isAutoRepeat && root.dockApps[root.dockIndex]) { root.openMenu(root.dockApps[root.dockIndex]); }
+                if (!event.isAutoRepeat && root.homeMode === "apps" && root.dockApps[root.dockIndex]) { root.openMenu(root.dockApps[root.dockIndex]); }
                 event.accepted = true; break;
             case Qt.Key_Back: case 0x01200003:
                 // The home screen is the floor: BACK here goes nowhere. Quitting
@@ -595,11 +686,104 @@ WebOSWindow {
         x: dock.x + dock.width + 26
         y: dock.y + 28 + root.dockIndex * (root.tileSize + root.tileGap) + root.tileSize / 2 - height / 2
         Behavior on y { NumberAnimation { duration: 140; easing.type: Easing.OutCubic } }
-        text: root.dockIndex === root.dockApps.length ? "All Apps"
-              : (root.dockApps[root.dockIndex] ? root.dockApps[root.dockIndex].title : "")
+        text: {
+            if (root.pillFocused) { return ""; }
+            if (root.homeMode === "inputs") {
+                var d = root.inputs[root.dockIndex];
+                return d ? d.label + (d.hdmiPlugIn ? "  ·  Connected" : "  ·  Nothing plugged in") : "";
+            }
+            return root.dockIndex === root.dockApps.length ? "All Apps"
+                   : (root.dockApps[root.dockIndex] ? root.dockApps[root.dockIndex].title : "");
+        }
         color: "white"
         font.family: "LG Smart UI"; font.pixelSize: 30; font.weight: Font.DemiBold
         style: Text.Raised; styleColor: "#80000000"
+    }
+
+    // ------------------------------------------------------------------
+    // Apps / Inputs pill, top middle, glass
+    // ------------------------------------------------------------------
+
+    Item {
+        id: modePill
+        visible: !root.gridOpen
+        anchors.horizontalCenter: parent.horizontalCenter
+        anchors.top: parent.top; anchors.topMargin: 52
+        width: 440; height: 76
+
+        Rectangle {
+            id: pillBody
+            anchors.fill: parent
+            radius: height / 2
+            gradient: Gradient {
+                GradientStop { position: 0.0; color: "#40ffffff" }
+                GradientStop { position: 1.0; color: "#1affffff" }
+            }
+            border.color: root.pillFocused ? "#ffffff" : "#73ffffff"
+            border.width: root.pillFocused ? 3 : 1.5
+        }
+        DropShadow {
+            anchors.fill: pillBody
+            source: pillBody
+            verticalOffset: 10; radius: 24; samples: 33
+            color: "#66000000"
+            z: -1
+        }
+        // The thumb: half the width, slides to the selected side.
+        Rectangle {
+            id: pillThumb
+            y: 6; height: parent.height - 12
+            width: (parent.width - 12) / 2
+            x: root.homeMode === "apps" ? 6 : parent.width - width - 6
+            Behavior on x { NumberAnimation { duration: 180; easing.type: Easing.OutCubic } }
+            radius: height / 2
+            gradient: Gradient {
+                GradientStop { position: 0.0; color: "#f2ffffff" }
+                GradientStop { position: 1.0; color: "#bfe6e6ee" }
+            }
+            // a glass highlight along the top edge
+            Rectangle {
+                x: 14; y: 4; width: parent.width - 28; height: parent.height * 0.42
+                radius: height / 2
+                gradient: Gradient {
+                    GradientStop { position: 0.0; color: "#99ffffff" }
+                    GradientStop { position: 1.0; color: "#00ffffff" }
+                }
+            }
+        }
+        Row {
+            anchors.fill: parent
+            Repeater {
+                model: ["apps", "inputs"]
+                Item {
+                    width: modePill.width / 2; height: modePill.height
+                    Text {
+                        anchors.centerIn: parent
+                        text: modelData === "apps" ? "Apps" : "Inputs"
+                        color: root.homeMode === modelData ? "#111111" : "white"
+                        font.family: "LG Smart UI"; font.pixelSize: 28; font.weight: Font.DemiBold
+                        style: root.homeMode === modelData ? Text.Normal : Text.Raised; styleColor: "#80000000"
+                    }
+                }
+            }
+        }
+        Keys.onPressed: {
+            root.touch();
+            switch (event.key) {
+            case Qt.Key_Left: case Qt.Key_Right:
+                if (event.isAutoRepeat) { break; }
+                root.homeMode = root.homeMode === "apps" ? "inputs" : "apps";
+                root.dockIndex = 0;
+                if (root.homeMode === "inputs") { root.loadInputs(); }
+                break;
+            case Qt.Key_Down: case Qt.Key_Return: case Qt.Key_Enter: case Qt.Key_Select:
+                root.pillFocused = false; dock.forceActiveFocus(); break;
+            case Qt.Key_Back: case 0x01200003:
+                root.pillFocused = false; dock.forceActiveFocus(); break;
+            default: return;
+            }
+            event.accepted = true;
+        }
     }
 
     // ------------------------------------------------------------------
@@ -613,6 +797,7 @@ WebOSWindow {
         visible: opacity > 0
         opacity: root.gridOpen ? 1 : 0
         Behavior on opacity { NumberAnimation { duration: 180 } }
+
 
         Text {
             id: gridTitle
