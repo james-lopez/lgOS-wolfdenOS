@@ -152,9 +152,11 @@ To revert all modifications back to factory stock webOS:
 ## How It Is Built and Deployed
 
 - `qmlhome/` is the home screen: `appinfo.json`, `main.qml`, `Tile.qml`,
-  icons. `tools/build_ipk.py qmlhome -o wwwroot/wolfdenos-qmlhome.ipk
-  --exclude splash.png` packages it (needed only when `appinfo.json`
-  changes); `tools/push_qmlhome.py` pushes the `.qml` files straight onto the
+  icons. `splash.png` there is unused (a copy of the old launcher's splash,
+  kept in case a splash is ever wanted; `appinfo.json` sets
+  `noSplashOnLaunch`). `tools/build_ipk.py qmlhome -o
+  wwwroot/wolfdenos-qmlhome.ipk --exclude splash.png` packages it (needed
+  only when `appinfo.json` changes); `tools/push_qmlhome.py` pushes the `.qml` files straight onto the
   TV and relaunches, which is the dev loop. The background video and still
   (`wwwroot/home-bg.mp4`, `home-bg-still.jpg`, gitignored third-party art)
   are served at deploy time and copied into the app directory by `apply.sh`.
