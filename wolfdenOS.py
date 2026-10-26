@@ -6,7 +6,7 @@
 
 """
 wolfdenOS.py / wolfdenOS.py - Connect to an LG webOS TV over SSAP, pair, and
-deploy wolfdenOS (Custom Purplish Glass Dock Home + Native wolf OS Core Mods).
+deploy wolfdenOS (the QML home screen and the system patches).
 
 Single file, standard library only. Requires Python 3 and should be run on
 a PC on the same LAN as the TV.
@@ -568,8 +568,11 @@ def _route_selected_local_ip(remote_ip, remote_port):
             return None
 
 
-def required_files():
-    return [ENTRY_PAGE, SHELL_SCRIPT] + list(SERVICE_FILES)
+def required_files(root_only=False):
+    files = [ENTRY_PAGE, SHELL_SCRIPT] + list(SERVICE_FILES)
+    if root_only:
+        files = [f for f in files if f != "debloat_home.sh"]
+    return files
 
 
 def resolve_wwwroot_path():
@@ -736,13 +739,14 @@ HOME_BANNER_SIZES = (
 PATCHED_LIBAPP = "libapp.so"
 BACKGROUND_VIDEO = "bg.mp4"
 QMLHOME_IPK = "wolfdenos-qmlhome.ipk"
+HBCHANNEL_IPK = "hbchannel.ipk"
 # Live background for the QML home app and the still it falls back to when
 # idle. Large and not ours, so served at deploy time rather than packaged.
 HOME_BG_VIDEO = "home-bg.mp4"
 HOME_BG_STILL = "home-bg-still.jpg"
 EXTRA_SERVABLE_FILES = (
     (LAUNCHER_IPK, HOME_BANNER, PATCHED_LIBAPP, BACKGROUND_VIDEO,
-     QMLHOME_IPK, HOME_BG_VIDEO, HOME_BG_STILL)
+     QMLHOME_IPK, HBCHANNEL_IPK, HOME_BG_VIDEO, HOME_BG_STILL)
     + HOME_BANNER_SIZES
 )
 
@@ -923,10 +927,12 @@ def build_self_hosted_url(
     local_ip_override=None,
     curl_insecure=False,
     fake_service_path=DEFAULT_FAKE_SERVICE_PATH,
+    root_only=False,
 ):
     local_ip = local_ip_override or local_ip_for_remote(tv_host)
+    svc_files = [f for f in SERVICE_FILES if not (root_only and f == "debloat_home.sh")]
     url = "http://%s:%d/%s" % (local_ip, server_port, ENTRY_PAGE)
-    url += "?script=%s&files=%s" % (SHELL_SCRIPT, ";".join(SERVICE_FILES))
+    url += "?script=%s&files=%s" % (SHELL_SCRIPT, ";".join(svc_files))
     if debug:
         url += "&debug"
     if curl_insecure:
@@ -1124,13 +1130,14 @@ def run(
     fake_service_path=DEFAULT_FAKE_SERVICE_PATH,
     log_wait=DEFAULT_LOG_WAIT,
     connect_timeout=CONNECT_TIMEOUT,
+    root_only=False,
 ):
     secure = True
     port = PORT_TLS if secure else PORT_PLAIN
     scheme = "wss" if secure else "ws"
     log("connecting to %s://%s:%d" % (scheme, host, port))
 
-    tracked_files = required_files()
+    tracked_files = required_files(root_only=root_only)
     wwwroot_dir = None
     asset_source_used = None
     allow_embedded_assets = True
@@ -1176,6 +1183,7 @@ def run(
             curl_insecure=curl_insecure,
             local_ip_override=local_ip_override,
             fake_service_path=fake_service_path,
+            root_only=root_only,
         )
     except Exception as exc:
         die("could not start self-hosted page server: %s" % exc)
@@ -1247,18 +1255,10 @@ def run(
 
         log("[wolfdenOS] waiting for TV to pull all wolfdenOS payload files...")
         tracker.wait_for_all(None)
-        log("[wolfdenOS] all payload files delivered to TV — applying wolfdenOS & wolf OS!")
-        log("[wolfdenOS] waiting 5s for root script to finish installing wolfdenOS before closing stage...")
-        time.sleep(5.0)
-        try:
-            client.request("ssap://system.launcher/close", {"id": app_id}, timeout=3.0)
-        except Exception:
-            pass
-        try:
-            launch_app(client, "tld.slopbro.g3mod", {})
-            log("[wolfdenOS] launched wolfdenOS dashboard (tld.slopbro.g3mod) on TV!")
-        except Exception:
-            pass
+        if root_only:
+            log("[wolfdenOS] root payload delivered to TV — running autoroot.sh (Homebrew Channel install & elevation)!")
+        else:
+            log("[wolfdenOS] all payload files delivered to TV — applying wolfdenOS & wolf OS!")
 
         if log_wait > 0 and log_url:
             log(
@@ -1315,6 +1315,10 @@ def main(argv=None):
             "seconds to hold the HTTP server open after install to collect "
             "TV-side script output (0 disables; default: %d)" % DEFAULT_LOG_WAIT
         ),
+    )
+    parser.add_argument(
+        "--root-only", action="store_true",
+        help="only root the TV and install/elevate Homebrew Channel (skip debloat_home.sh)",
     )
     parser.add_argument(
         "--curl-insecure", action="store_true",
@@ -1383,6 +1387,7 @@ def main(argv=None):
             fake_service_path=args.fake_service_path,
             log_wait=args.log_wait,
             connect_timeout=args.connect_timeout,
+            root_only=args.root_only,
         )
     return 0
 

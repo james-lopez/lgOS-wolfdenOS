@@ -27,6 +27,7 @@ class CommandLineTests(unittest.TestCase):
             curl_insecure=False, fake_service_path=slopbro.DEFAULT_FAKE_SERVICE_PATH,
             log_wait=slopbro.DEFAULT_LOG_WAIT,
             connect_timeout=slopbro.CONNECT_TIMEOUT,
+            root_only=False,
         )
         self.runners["run_test_connection"].assert_not_called()
         self.runners["run_test_payload"].assert_not_called()
@@ -47,7 +48,14 @@ class CommandLineTests(unittest.TestCase):
                 curl_insecure=True, fake_service_path=slopbro.DEFAULT_FAKE_SERVICE_PATH,
                 log_wait=slopbro.DEFAULT_LOG_WAIT,
                 connect_timeout=slopbro.CONNECT_TIMEOUT,
+                root_only=False,
             )
+
+    def test_root_only_option(self):
+        self.assertEqual(slopbro.main(["--root-only", "tv.local"]), 0)
+        self.assertTrue(self.runners["run"].call_args.kwargs["root_only"])
+        self.assertNotIn("debloat_home.sh", slopbro.required_files(root_only=True))
+        self.assertIn("debloat_home.sh", slopbro.required_files(root_only=False))
 
     def test_fake_service_path_options(self):
         for argv, expected in (

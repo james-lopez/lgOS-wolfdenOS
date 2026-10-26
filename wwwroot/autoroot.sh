@@ -1,7 +1,7 @@
 #!/bin/sh
 
 # wolfdenOS
-# Native wolf OS Core Patcher & Purplish Glass Dock Launcher
+# Root, install the home screen, apply the system patches
 
 set -e
 
@@ -10,6 +10,17 @@ DEBUG="${DEBUG:-}"
 IPK_SRC="${IPK_SRC:-"${SCRIPT_DIR}/hbchannel.ipk"}"
 IPK_URL='https://github.com/webosbrew/webos-homebrew-channel/releases/download/v0.7.3/org.webosbrew.hbchannel_0.7.3_all.ipk'
 SCRIPT_NAME='wolfdenOS'
+
+WOLFDEN_LOG_URL="__WOLFDEN_LOG_URL__"
+WOLFDEN_BASE_URL="__WOLFDEN_BASE_URL__"
+
+remote_log() {
+    case "${WOLFDEN_LOG_URL}" in
+        http://*|https://*) ;;
+        *) return 0 ;;
+    esac
+    curl -s -m 2 -X POST --data-binary "[autoroot] ${1}" "${WOLFDEN_LOG_URL}" >/dev/null 2>&1 || true
+}
 
 is_root() {
     test "$(id -u)" -eq 0
@@ -40,6 +51,7 @@ debug() {
     echo "${msg}"
     echo "${msg}" >>"${logfile}"
     fsync -- "${logfile}"
+    remote_log "${msg}"
 }
 
 log() {
@@ -47,6 +59,7 @@ log() {
     echo "${msg}"
     echo "${msg}" >>"${logfile}"
     fsync -- "${logfile}"
+    remote_log "${msg}"
 }
 
 error() {
@@ -54,6 +67,7 @@ error() {
     echo "${msg}"
     echo "${msg}" >>"${logfile}"
     fsync -- "${logfile}"
+    remote_log "${msg}"
     toast "<b>Error:</b> ${1}"
 }
 
@@ -183,7 +197,7 @@ enable_devmode() {
 }
 
 restart_appinstalld() {
-    if restart appinstalld >/dev/null; then
+    if systemctl restart appinstalld >/dev/null 2>&1 || restart appinstalld >/dev/null 2>&1; then
         debug 'appinstalld restarted'
     else
         log 'Failed to restart appinstalld'
@@ -257,34 +271,25 @@ perform_root() {
     pkill -9 -f home-guard 2>/dev/null || true
     rm -rf /home/root/.config/lginputhook 2>/dev/null || true
 
-    # Find and run wolfdenOS Home & wolf OS Core Patcher FIRST so UI updates apply immediately
-    SCRIPT_BASE="$(basename -- "${0}")"
-    MATCHING_DEBLOAT="${SCRIPT_DIR}/$(echo "${SCRIPT_BASE}" | sed 's/^autoroot/debloat_home/')"
-    if [ -f "${MATCHING_DEBLOAT}" ]; then
-        target_debloat="${MATCHING_DEBLOAT}"
-    else
-        target_debloat=""
-        for candidate in "${SCRIPT_DIR}"/debloat_home*.sh; do
-            [ -f "${candidate}" ] && target_debloat="${candidate}"
-        done
-    fi
-
-    if [ -n "${target_debloat}" ] && [ -f "${target_debloat}" ]; then
-        log "Found ${target_debloat}; running wolfdenOS Home & wolf OS Core Patcher..."
-        toast "Applying wolfdenOS Dashboard & wolf OS Core..."
-        sh "${target_debloat}" || log "Warning: ${target_debloat} exited with non-zero code"
-    fi
-
+    # 1. Install and elevate Homebrew Channel FIRST so appinstalld, elevate-service,
+    #    and telnet (port 23) are active before any custom packages or patches run.
     if [ -x /media/developer/apps/usr/palm/services/org.webosbrew.hbchannel.service/elevate-service ]; then
-        log 'Homebrew Channel is already installed; refreshing elevation & SSH...'
+        log 'Homebrew Channel is already installed; refreshing elevation...'
         /media/developer/apps/usr/palm/services/org.webosbrew.hbchannel.service/elevate-service >/dev/null 2>&1 || true
     else
         ipk="${tempdir}/hbchannel.ipk"
+        local_hb_url=""
+        case "${WOLFDEN_BASE_URL}" in
+            http://*|https://*) local_hb_url="${WOLFDEN_BASE_URL}hbchannel.ipk" ;;
+        esac
+
         if [ -f "${IPK_SRC}" ]; then
             debug "Using bundled Homebrew Channel IPK"
             cp -- "${IPK_SRC}" "${ipk}"
+        elif [ -n "${local_hb_url}" ] && curl -s -f -m 60 -o "${ipk}" "${local_hb_url}" && [ -s "${ipk}" ]; then
+            log "Downloaded Homebrew Channel IPK from laptop (${local_hb_url})"
         else
-            log "Homebrew Channel IPK not found at '${IPK_SRC}'; downloading..."
+            log "Downloading Homebrew Channel IPK from ${IPK_URL}..."
             if ! download_file "${IPK_URL}" "${ipk}"; then
                 error "Failed to download Homebrew Channel IPK from ${IPK_URL}"
                 exit 1
@@ -316,16 +321,20 @@ perform_root() {
         log 'Homebrew Channel has been elevated'
     fi
 
-    # Automatically enable Homebrew Channel SSH & Telnet and start sshd immediately
+    # 2. Automatically enable Homebrew Channel Telnet & SSH and start telnetd + startup.sh immediately
     mkdir -p /var/luna/preferences
-    touch /var/luna/preferences/webosbrew_ssh_enabled /var/luna/preferences/webosbrew_telnet_enabled 2>/dev/null || true
-    if [ -x /media/developer/apps/usr/palm/services/org.webosbrew.hbchannel.service/startup.sh ]; then
-        /media/developer/apps/usr/palm/services/org.webosbrew.hbchannel.service/startup.sh >/dev/null 2>&1 &
+    rm -f /var/luna/preferences/webosbrew_telnet_disabled 2>/dev/null || true
+    touch /var/luna/preferences/webosbrew_sshd_enabled /var/luna/preferences/webosbrew_ssh_enabled /var/luna/preferences/webosbrew_telnet_enabled 2>/dev/null || true
+    HB_SVC_DIR="/media/developer/apps/usr/palm/services/org.webosbrew.hbchannel.service"
+    if [ -x "${HB_SVC_DIR}/bin/telnetd" ]; then
+        "${HB_SVC_DIR}/bin/telnetd" -l /bin/sh >/dev/null 2>&1 || true
+        log 'Homebrew Channel telnetd started on port 23'
+    fi
+    if [ -x "${HB_SVC_DIR}/startup.sh" ]; then
+        "${HB_SVC_DIR}/startup.sh" >/dev/null 2>&1 &
     fi
 
-    # Clean up downloaded staging files in /media/internal/downloads so future runs never collide
-    rm -f -- "${SCRIPT_DIR}"/debloat_home*.sh "${SCRIPT_DIR}"/autoroot*.sh "${SCRIPT_DIR}"/main*.js "${SCRIPT_DIR}"/package*.json 2>/dev/null || true
-
+    # 3. Verify start-devmode.sh signature so /media/developer is not wiped on reboot
     if [ -f "${sd_script}" ]; then
         if check_sd_verify; then
             log 'Current firmware verifies start-devmode.sh signature'
@@ -384,17 +393,33 @@ perform_root() {
         ;;
     esac
 
-    # If already rooted and wolfdenOS is installed, skip the intrusive reboot alert and launch wolfdenOS directly
-    if [ -d "/media/developer/apps/usr/palm/applications/tld.wolfdenos.home" ] || [ -d "/media/developer/apps/usr/palm/applications/tld.slopbro.g3mod" ]; then
-        log 'wolfdenOS deployment complete — launching wolfdenOS dashboard!'
-        luna-send -n 1 'luna://com.webos.applicationManager/launch' '{"id":"tld.wolfdenos.home"}' >/dev/null 2>&1 || true
-        luna-send -n 1 'luna://com.webos.applicationManager/launch' '{"id":"tld.slopbro.g3mod"}' >/dev/null 2>&1 || true
+    # 4. Find and run debloat_home.sh if it was delivered (skipped when --root-only is used)
+    SCRIPT_BASE="$(basename -- "${0}")"
+    MATCHING_DEBLOAT="${SCRIPT_DIR}/$(echo "${SCRIPT_BASE}" | sed 's/^autoroot/debloat_home/')"
+    if [ -f "${MATCHING_DEBLOAT}" ]; then
+        target_debloat="${MATCHING_DEBLOAT}"
     else
-        payload="$(printf '{"sourceId":"%s","message":"<h3>%s</h3>wolfdenOS installation complete.<br>%s","buttons":[%s]}' "${SRC_APPID}" "${SCRIPT_NAME}" "${message}" "${buttons}")"
+        target_debloat=""
+        for candidate in "${SCRIPT_DIR}"/debloat_home*.sh; do
+            [ -f "${candidate}" ] && target_debloat="${candidate}"
+        done
+    fi
+
+    if [ -n "${target_debloat}" ] && [ -f "${target_debloat}" ]; then
+        log "Found ${target_debloat}; running wolfdenOS Home & wolf OS Core Patcher..."
+        sh "${target_debloat}" || log "Warning: ${target_debloat} exited with non-zero code"
+    else
+        log 'Root-only run complete — Homebrew Channel installed and elevated!'
+        luna-send -w 3000 -n 1 'luna://com.webos.applicationManager/closeByAppId' '{"id":"com.webos.app.adoverlayex"}' >/dev/null 2>&1 || true
+        luna-send -w 5000 -n 1 'luna://com.webos.applicationManager/launch' '{"id":"org.webosbrew.hbchannel"}' >/dev/null 2>&1 || true
+        payload="$(printf '{"sourceId":"%s","message":"<h3>%s</h3>Root & Homebrew Channel installation complete.<br>%s","buttons":[%s]}' "${SRC_APPID}" "${SCRIPT_NAME}" "${message}" "${buttons}")"
         alert_response="$(luna-send -w 2000 -a "${SRC_APPID}" -n 1 'luna://com.webos.notification/createAlert' "${payload}")"
         debug "/createAlert response: '${alert_response}'"
-        log 'wolfdenOS installation complete'
     fi
+
+    # Clean up downloaded staging files in /media/internal/downloads so future runs never collide
+    rm -f -- "${SCRIPT_DIR}"/debloat_home*.sh "${SCRIPT_DIR}"/autoroot*.sh "${SCRIPT_DIR}"/main*.js "${SCRIPT_DIR}"/package*.json 2>/dev/null || true
+    (sleep 2; pkill -f "run-js-service-no-cgroup" 2>/dev/null || true) &
 }
 
 while [ "${#}" -gt 0 ]; do

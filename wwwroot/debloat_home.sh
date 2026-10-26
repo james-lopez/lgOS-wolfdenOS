@@ -1,6 +1,6 @@
 #!/bin/sh
 # ==============================================================================
-# wolfdenOS — Iteration 2 (Purplish Glass Dock + wolf OS Core Patcher)
+# wolfdenOS — deploy payload (home screen install + system patches)
 # Built for LG OLED65G3PUA (10.3.0-2504 (webOS 25))
 # ==============================================================================
 
@@ -409,7 +409,7 @@ fetch_background_video() {
     log "background video download failed"
     return 1
 }
-fetch_background_video || true
+[ "${WOLFDEN_INSTALL_LAUNCHER}" = "1" ] && fetch_background_video || true
 
 # Earlier builds wrote a 1x1 black PNG here and apply.sh copies this directory
 # over the overlay, so the stock bg_banner_img.png kept reading back as 1x1 and
@@ -1122,7 +1122,7 @@ alog "watchers alive: $(for b in acr2 admanager rdxd uploadd; do pidof $b >/dev/
 
 # Ensure Homebrew Channel SSH & Telnet are enabled and running
 mkdir -p /var/luna/preferences
-touch /var/luna/preferences/webosbrew_ssh_enabled /var/luna/preferences/webosbrew_telnet_enabled 2>/dev/null || true
+touch /var/luna/preferences/webosbrew_sshd_enabled /var/luna/preferences/webosbrew_ssh_enabled /var/luna/preferences/webosbrew_telnet_enabled 2>/dev/null || true
 if [ -x /media/developer/apps/usr/palm/services/org.webosbrew.hbchannel.service/startup.sh ]; then
     /media/developer/apps/usr/palm/services/org.webosbrew.hbchannel.service/startup.sh >/dev/null 2>&1 &
 fi
@@ -1355,12 +1355,12 @@ reboot_tv() {
     ) &
 }
 
-if [ "${LAUNCHER_INSTALLED}" = "1" ]; then
-    # No success toast: the launcher itself coming up is the confirmation, and
+if [ "${QMLHOME_INSTALLED}" = "1" ] || [ "${LAUNCHER_INSTALLED}" = "1" ]; then
+    # No success toast: the home screen itself coming up is the confirmation, and
     # a toast on top of it is just noise on the TV.
     log "wolfdenOS & wolf OS installation complete!"
 else
-    log "wolfdenOS core patches applied, but the launcher app did NOT install"
+    log "wolfdenOS core patches applied, but the home app did NOT install"
 fi
 
 reboot_tv || true

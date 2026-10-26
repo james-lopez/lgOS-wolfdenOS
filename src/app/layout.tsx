@@ -13,9 +13,9 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "lgOS-wolfdenOS — wolfdenOS Glass Dock Launcher & wolf OS Core Patcher",
+  title: "lgOS-wolfdenOS",
   description:
-    "Plug-and-play wolfdenOS & wolf OS suite for LG webOS TVs (OLED65G3PUA / webOS 25 10.3.0) with a purplish horizontal glass dock, debloated wolf OS core home, and ad/ACR sinkhole.",
+    "A replacement home screen and privacy patcher for rooted LG webOS TVs.",
 };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {

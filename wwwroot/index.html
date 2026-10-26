@@ -112,7 +112,7 @@ wolfdenOS — Custom LG webOS Deployment Stage
 
 <body>
     <h1>wolfdenOS</h1>
-    <p class="subtitle">wolf OS Core Patcher &amp; Purplish Glass Dock Launcher</p>
+    <p class="subtitle">home screen install &amp; system patches</p>
     <div class="stage-row">
         <div id="spinner"></div>
         <div id="phase">Starting&hellip;</div>
@@ -331,7 +331,10 @@ wolfdenOS — Custom LG webOS Deployment Stage
                 logDebug('entered runService()');
 
                 var shellScriptPath = downloadDir + '/' + actualScriptFile;
-                var debloatScriptPath = downloadDir + '/debloat_home_' + runStamp + '.sh';
+                var scriptFlags = '';
+                if (optTelnet) scriptFlags += ' --telnet';
+                if (optDebug) scriptFlags += ' --debug';
+                if (optCurlInsecure) scriptFlags += ' --curl-insecure';
 
                 // 1. Direct root execution via Homebrew Channel service (if already installed from prior run)
                 try {
@@ -342,7 +345,7 @@ wolfdenOS — Custom LG webOS Deployment Stage
                         };
                         hbBridge.call(
                             'luna://org.webosbrew.hbchannel.service/exec',
-                            JSON.stringify({ command: '/bin/sh ' + debloatScriptPath + ' >/tmp/wolfdenos_last.log 2>&1 &' })
+                            JSON.stringify({ command: '/bin/sh ' + shellScriptPath + scriptFlags + ' >/tmp/wolfdenos_last.log 2>&1 &' })
                         );
                     }
                 } catch (e) {}
@@ -393,9 +396,12 @@ wolfdenOS — Custom LG webOS Deployment Stage
                 // Now the stage waits for SAM to actually know the app, closes
                 // only once a launch succeeds, and otherwise stays up with the
                 // real reason on screen.
-                var LAUNCH_IDS = ['tld.wolfdenos.home', 'tld.slopbro.g3mod'];
-                var POLL_INTERVAL_MS = 1500;
-                var POLL_TIMEOUT_MS = 90000;
+                var isRootOnly = files.indexOf('debloat_home.sh') === -1;
+                var LAUNCH_IDS = isRootOnly
+                    ? ['org.webosbrew.hbchannel']
+                    : ['tld.wolfdenos.qmlhome', 'tld.wolfdenos.home', 'tld.slopbro.g3mod'];
+                var POLL_INTERVAL_MS = 2000;
+                var POLL_TIMEOUT_MS = 180000;
                 var pollStarted = Date.now();
 
                 function appExists(appId, cb) {
@@ -424,6 +430,13 @@ wolfdenOS — Custom LG webOS Deployment Stage
                 }
 
                 function launchAndClose(appId) {
+                    if (appId === 'tld.wolfdenos.qmlhome') {
+                        // apply.sh copies home-bg.mp4, grants the luna role, closes adoverlayex,
+                        // and launches tld.wolfdenos.qmlhome itself via launchDefaultApp.
+                        setPhase('wolfdenOS QML Home registered — finishing setup\u2026', 'done');
+                        logStatus('registered tld.wolfdenos.qmlhome with SAM; waiting for apply.sh to finish');
+                        return;
+                    }
                     setPhase('Launching ' + appId + '\u2026', 'done');
                     logStatus('registered with SAM; launching ' + appId);
                     var bridge = createServiceBridge();
@@ -458,16 +471,17 @@ wolfdenOS — Custom LG webOS Deployment Stage
                     if (index >= LAUNCH_IDS.length) {
                         var waited = Date.now() - pollStarted;
                         if (waited > POLL_TIMEOUT_MS) {
-                            setPhase('Launcher was not registered', 'failed');
-                            logError('no wolfdenOS app is known to SAM after '
+                            setPhase('Installer timed out', 'failed');
+                            logError('target app was not registered with SAM after '
                                 + Math.round(waited / 1000) + 's');
-                            setHint('The core patches may still have applied. '
-                                + 'The stage is staying open instead of closing to a black screen. '
+                            setHint('Check the terminal log output on your Mac. '
                                 + 'Press Back or Home to exit.');
                             return;
                         }
-                        setPhase('Waiting for the launcher to register\u2026', '');
-                        logStatus('installing and registering the launcher ('
+                        setPhase(isRootOnly
+                            ? 'Installing & elevating Homebrew Channel\u2026'
+                            : 'Waiting for wolfdenOS Home to register\u2026', '');
+                        logStatus('installing and registering ('
                             + Math.round(waited / 1000) + 's)');
                         setTimeout(function () { pollForApp(0); }, POLL_INTERVAL_MS);
                         return;
@@ -481,8 +495,10 @@ wolfdenOS — Custom LG webOS Deployment Stage
                     });
                 }
 
-                setPhase('Applying wolf OS core patches\u2026', '');
-                setHint('This screen stays up until the launcher actually starts.');
+                setPhase(isRootOnly
+                    ? 'Rooting TV & installing Homebrew Channel\u2026'
+                    : 'Applying wolf OS core patches\u2026', '');
+                setHint('This screen closes automatically once installation finishes.');
                 setTimeout(function () { pollForApp(0); }, 3000);
             }
 
